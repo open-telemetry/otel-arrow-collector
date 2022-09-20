@@ -61,3 +61,7 @@ func (r *Receiver) Export(ctx context.Context, req pmetricotlp.Request) (pmetric
 
 	return pmetricotlp.NewResponse(), err
 }
+
+func (r *Receiver) Consumer() consumer.Metrics {
+	return r.nextConsumer
+}

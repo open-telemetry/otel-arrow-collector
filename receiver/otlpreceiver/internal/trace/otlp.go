@@ -62,3 +62,7 @@ func (r *Receiver) Export(ctx context.Context, req ptraceotlp.Request) (ptraceot
 
 	return ptraceotlp.NewResponse(), err
 }
+
+func (r *Receiver) Consumer() consumer.Traces {
+	return r.nextConsumer
+}
