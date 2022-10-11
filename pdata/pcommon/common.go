@@ -35,7 +35,7 @@ type ValueType int32
 
 const (
 	ValueTypeEmpty ValueType = iota
-	ValueTypeString
+	ValueTypeStr
 	ValueTypeInt
 	ValueTypeDouble
 	ValueTypeBool
@@ -49,7 +49,7 @@ func (avt ValueType) String() string {
 	switch avt {
 	case ValueTypeEmpty:
 		return "EMPTY"
-	case ValueTypeString:
+	case ValueTypeStr:
 		return "STRING"
 	case ValueTypeBool:
 		return "BOOL"
@@ -74,9 +74,9 @@ func (avt ValueType) String() string {
 // value representation. For the same reason passing by value and calling setters
 // will modify the original, e.g.:
 //
-//	func f1(val Value) { val.SetIntVal(234) }
+//	func f1(val Value) { val.SetInt(234) }
 //	func f2() {
-//	    v := NewValueString("a string")
+//	    v := NewValueStr("a string")
 //	    f1(v)
 //	    _ := v.Type() // this will return ValueTypeInt
 //	}
@@ -90,10 +90,13 @@ func NewValueEmpty() Value {
 	return newValue(&otlpcommon.AnyValue{})
 }
 
-// NewValueString creates a new Value with the given string value.
-func NewValueString(v string) Value {
+// NewValueStr creates a new Value with the given string value.
+func NewValueStr(v string) Value {
 	return newValue(&otlpcommon.AnyValue{Value: &otlpcommon.AnyValue_StringValue{StringValue: v}})
 }
+
+// Deprecated: [0.62.0] Use NewValueStr instead.
+var NewValueString = NewValueStr
 
 // NewValueInt creates a new Value with the given int64 value.
 func NewValueInt(v int64) Value {
@@ -125,9 +128,6 @@ func NewValueBytes() Value {
 	return newValue(&otlpcommon.AnyValue{Value: &otlpcommon.AnyValue_BytesValue{BytesValue: nil}})
 }
 
-// Deprecated: [0.61.0] Use NewValueBytes instead
-var NewValueBytesEmpty = NewValueBytes
-
 func newValue(orig *otlpcommon.AnyValue) Value {
 	return Value(internal.NewValue(orig))
 }
@@ -141,41 +141,41 @@ func (v Value) FromRaw(iv interface{}) {
 	case nil:
 		v.getOrig().Value = nil
 	case string:
-		v.SetStringVal(tv)
+		v.SetStr(tv)
 	case int:
-		v.SetIntVal(int64(tv))
+		v.SetInt(int64(tv))
 	case int8:
-		v.SetIntVal(int64(tv))
+		v.SetInt(int64(tv))
 	case int16:
-		v.SetIntVal(int64(tv))
+		v.SetInt(int64(tv))
 	case int32:
-		v.SetIntVal(int64(tv))
+		v.SetInt(int64(tv))
 	case int64:
-		v.SetIntVal(tv)
+		v.SetInt(tv)
 	case uint:
-		v.SetIntVal(int64(tv))
+		v.SetInt(int64(tv))
 	case uint8:
-		v.SetIntVal(int64(tv))
+		v.SetInt(int64(tv))
 	case uint16:
-		v.SetIntVal(int64(tv))
+		v.SetInt(int64(tv))
 	case uint32:
-		v.SetIntVal(int64(tv))
+		v.SetInt(int64(tv))
 	case uint64:
-		v.SetIntVal(int64(tv))
+		v.SetInt(int64(tv))
 	case float32:
-		v.SetDoubleVal(float64(tv))
+		v.SetDouble(float64(tv))
 	case float64:
-		v.SetDoubleVal(tv)
+		v.SetDouble(tv)
 	case bool:
-		v.SetBoolVal(tv)
+		v.SetBool(tv)
 	case []byte:
-		v.SetEmptyBytesVal().FromRaw(tv)
+		v.SetEmptyBytes().FromRaw(tv)
 	case map[string]interface{}:
-		v.SetEmptyMapVal().FromRaw(tv)
+		v.SetEmptyMap().FromRaw(tv)
 	case []interface{}:
-		v.SetEmptySliceVal().FromRaw(tv)
+		v.SetEmptySlice().FromRaw(tv)
 	default:
-		v.SetStringVal(fmt.Sprintf("<Invalid value type %T>", tv))
+		v.SetStr(fmt.Sprintf("<Invalid value type %T>", tv))
 	}
 }
 
@@ -184,7 +184,7 @@ func (v Value) FromRaw(iv interface{}) {
 func (v Value) Type() ValueType {
 	switch v.getOrig().Value.(type) {
 	case *otlpcommon.AnyValue_StringValue:
-		return ValueTypeString
+		return ValueTypeStr
 	case *otlpcommon.AnyValue_BoolValue:
 		return ValueTypeBool
 	case *otlpcommon.AnyValue_IntValue:
@@ -201,40 +201,41 @@ func (v Value) Type() ValueType {
 	return ValueTypeEmpty
 }
 
-// StringVal returns the string value associated with this Value.
-// If the Type() is not ValueTypeString then returns empty string.
+// Str returns the string value associated with this Value.
+// The shorter name is used instead of String to avoid implementing fmt.Stringer interface.
+// If the Type() is not ValueTypeStr then returns empty string.
 // Calling this function on zero-initialized Value will cause a panic.
-func (v Value) StringVal() string {
+func (v Value) Str() string {
 	return v.getOrig().GetStringValue()
 }
 
-// IntVal returns the int64 value associated with this Value.
+// Int returns the int64 value associated with this Value.
 // If the Type() is not ValueTypeInt then returns int64(0).
 // Calling this function on zero-initialized Value will cause a panic.
-func (v Value) IntVal() int64 {
+func (v Value) Int() int64 {
 	return v.getOrig().GetIntValue()
 }
 
-// DoubleVal returns the float64 value associated with this Value.
+// Double returns the float64 value associated with this Value.
 // If the Type() is not ValueTypeDouble then returns float64(0).
 // Calling this function on zero-initialized Value will cause a panic.
-func (v Value) DoubleVal() float64 {
+func (v Value) Double() float64 {
 	return v.getOrig().GetDoubleValue()
 }
 
-// BoolVal returns the bool value associated with this Value.
+// Bool returns the bool value associated with this Value.
 // If the Type() is not ValueTypeBool then returns false.
 // Calling this function on zero-initialized Value will cause a panic.
-func (v Value) BoolVal() bool {
+func (v Value) Bool() bool {
 	return v.getOrig().GetBoolValue()
 }
 
-// MapVal returns the map value associated with this Value.
+// Map returns the map value associated with this Value.
 // If the Type() is not ValueTypeMap then returns an invalid map. Note that using
 // such map can cause panic.
 //
 // Calling this function on zero-initialized Value will cause a panic.
-func (v Value) MapVal() Map {
+func (v Value) Map() Map {
 	kvlist := v.getOrig().GetKvlistValue()
 	if kvlist == nil {
 		return Map{}
@@ -242,12 +243,12 @@ func (v Value) MapVal() Map {
 	return newMap(&kvlist.Values)
 }
 
-// SliceVal returns the slice value associated with this Value.
+// Slice returns the slice value associated with this Value.
 // If the Type() is not ValueTypeSlice then returns an invalid slice. Note that using
 // such slice can cause panic.
 //
 // Calling this function on zero-initialized Value will cause a panic.
-func (v Value) SliceVal() Slice {
+func (v Value) Slice() Slice {
 	arr := v.getOrig().GetArrayValue()
 	if arr == nil {
 		return Slice{}
@@ -255,12 +256,12 @@ func (v Value) SliceVal() Slice {
 	return newSlice(&arr.Values)
 }
 
-// BytesVal returns the ByteSlice value associated with this Value.
+// Bytes returns the ByteSlice value associated with this Value.
 // If the Type() is not ValueTypeBytes then returns an invalid ByteSlice object. Note that using
 // such slice can cause panic.
 //
 // Calling this function on zero-initialized Value will cause a panic.
-func (v Value) BytesVal() ByteSlice {
+func (v Value) Bytes() ByteSlice {
 	bv, ok := v.getOrig().GetValue().(*otlpcommon.AnyValue_BytesValue)
 	if !ok {
 		return ByteSlice{}
@@ -268,53 +269,55 @@ func (v Value) BytesVal() ByteSlice {
 	return ByteSlice(internal.NewByteSlice(&bv.BytesValue))
 }
 
-// SetStringVal replaces the string value associated with this Value,
-// it also changes the type to be ValueTypeString.
+// SetStr replaces the string value associated with this Value,
+// it also changes the type to be ValueTypeStr.
+// The shorter name is used instead of SetString to avoid implementing
+// fmt.Stringer interface by the corresponding getter method.
 // Calling this function on zero-initialized Value will cause a panic.
-func (v Value) SetStringVal(sv string) {
+func (v Value) SetStr(sv string) {
 	v.getOrig().Value = &otlpcommon.AnyValue_StringValue{StringValue: sv}
 }
 
-// SetIntVal replaces the int64 value associated with this Value,
+// SetInt replaces the int64 value associated with this Value,
 // it also changes the type to be ValueTypeInt.
 // Calling this function on zero-initialized Value will cause a panic.
-func (v Value) SetIntVal(iv int64) {
+func (v Value) SetInt(iv int64) {
 	v.getOrig().Value = &otlpcommon.AnyValue_IntValue{IntValue: iv}
 }
 
-// SetDoubleVal replaces the float64 value associated with this Value,
+// SetDouble replaces the float64 value associated with this Value,
 // it also changes the type to be ValueTypeDouble.
 // Calling this function on zero-initialized Value will cause a panic.
-func (v Value) SetDoubleVal(dv float64) {
+func (v Value) SetDouble(dv float64) {
 	v.getOrig().Value = &otlpcommon.AnyValue_DoubleValue{DoubleValue: dv}
 }
 
-// SetBoolVal replaces the bool value associated with this Value,
+// SetBool replaces the bool value associated with this Value,
 // it also changes the type to be ValueTypeBool.
 // Calling this function on zero-initialized Value will cause a panic.
-func (v Value) SetBoolVal(bv bool) {
+func (v Value) SetBool(bv bool) {
 	v.getOrig().Value = &otlpcommon.AnyValue_BoolValue{BoolValue: bv}
 }
 
-// SetEmptyBytesVal sets value to an empty byte slice and returns it.
+// SetEmptyBytes sets value to an empty byte slice and returns it.
 // Calling this function on zero-initialized Value will cause a panic.
-func (v Value) SetEmptyBytesVal() ByteSlice {
+func (v Value) SetEmptyBytes() ByteSlice {
 	bv := otlpcommon.AnyValue_BytesValue{BytesValue: nil}
 	v.getOrig().Value = &bv
 	return ByteSlice(internal.NewByteSlice(&bv.BytesValue))
 }
 
-// SetEmptyMapVal sets value to an empty map and returns it.
+// SetEmptyMap sets value to an empty map and returns it.
 // Calling this function on zero-initialized Value will cause a panic.
-func (v Value) SetEmptyMapVal() Map {
+func (v Value) SetEmptyMap() Map {
 	kv := &otlpcommon.AnyValue_KvlistValue{KvlistValue: &otlpcommon.KeyValueList{}}
 	v.getOrig().Value = kv
 	return newMap(&kv.KvlistValue.Values)
 }
 
-// SetEmptySliceVal sets value to an empty slice and returns it.
+// SetEmptySlice sets value to an empty slice and returns it.
 // Calling this function on zero-initialized Value will cause a panic.
-func (v Value) SetEmptySliceVal() Slice {
+func (v Value) SetEmptySlice() Slice {
 	av := &otlpcommon.AnyValue_ArrayValue{ArrayValue: &otlpcommon.ArrayValue{}}
 	v.getOrig().Value = av
 	return newSlice(&av.ArrayValue.Values)
@@ -426,34 +429,34 @@ func (v Value) Equal(av Value) bool {
 }
 
 // AsString converts an OTLP Value object of any type to its equivalent string
-// representation. This differs from StringVal which only returns a non-empty value
-// if the ValueType is ValueTypeString.
+// representation. This differs from GetString which only returns a non-empty value
+// if the ValueType is ValueTypeStr.
 func (v Value) AsString() string {
 	switch v.Type() {
 	case ValueTypeEmpty:
 		return ""
 
-	case ValueTypeString:
-		return v.StringVal()
+	case ValueTypeStr:
+		return v.Str()
 
 	case ValueTypeBool:
-		return strconv.FormatBool(v.BoolVal())
+		return strconv.FormatBool(v.Bool())
 
 	case ValueTypeDouble:
-		return float64AsString(v.DoubleVal())
+		return float64AsString(v.Double())
 
 	case ValueTypeInt:
-		return strconv.FormatInt(v.IntVal(), 10)
+		return strconv.FormatInt(v.Int(), 10)
 
 	case ValueTypeMap:
-		jsonStr, _ := json.Marshal(v.MapVal().AsRaw())
+		jsonStr, _ := json.Marshal(v.Map().AsRaw())
 		return string(jsonStr)
 
 	case ValueTypeBytes:
-		return base64.StdEncoding.EncodeToString(*v.BytesVal().getOrig())
+		return base64.StdEncoding.EncodeToString(*v.Bytes().getOrig())
 
 	case ValueTypeSlice:
-		jsonStr, _ := json.Marshal(v.SliceVal().AsRaw())
+		jsonStr, _ := json.Marshal(v.Slice().AsRaw())
 		return string(jsonStr)
 
 	default:
@@ -496,49 +499,49 @@ func (v Value) AsRaw() interface{} {
 	switch v.Type() {
 	case ValueTypeEmpty:
 		return nil
-	case ValueTypeString:
-		return v.StringVal()
+	case ValueTypeStr:
+		return v.Str()
 	case ValueTypeBool:
-		return v.BoolVal()
+		return v.Bool()
 	case ValueTypeDouble:
-		return v.DoubleVal()
+		return v.Double()
 	case ValueTypeInt:
-		return v.IntVal()
+		return v.Int()
 	case ValueTypeBytes:
-		return v.BytesVal().AsRaw()
+		return v.Bytes().AsRaw()
 	case ValueTypeMap:
-		return v.MapVal().AsRaw()
+		return v.Map().AsRaw()
 	case ValueTypeSlice:
-		return v.SliceVal().AsRaw()
+		return v.Slice().AsRaw()
 	}
 	return fmt.Sprintf("<Unknown OpenTelemetry value type %q>", v.Type())
 }
 
-func newAttributeKeyValueString(k string, v string) otlpcommon.KeyValue {
+func newKeyValueString(k string, v string) otlpcommon.KeyValue {
 	orig := otlpcommon.KeyValue{Key: k}
 	akv := newValue(&orig.Value)
-	akv.SetStringVal(v)
+	akv.SetStr(v)
 	return orig
 }
 
-func newAttributeKeyValueInt(k string, v int64) otlpcommon.KeyValue {
+func newKeyValueInt(k string, v int64) otlpcommon.KeyValue {
 	orig := otlpcommon.KeyValue{Key: k}
 	akv := newValue(&orig.Value)
-	akv.SetIntVal(v)
+	akv.SetInt(v)
 	return orig
 }
 
-func newAttributeKeyValueDouble(k string, v float64) otlpcommon.KeyValue {
+func newKeyValueDouble(k string, v float64) otlpcommon.KeyValue {
 	orig := otlpcommon.KeyValue{Key: k}
 	akv := newValue(&orig.Value)
-	akv.SetDoubleVal(v)
+	akv.SetDouble(v)
 	return orig
 }
 
-func newAttributeKeyValueBool(k string, v bool) otlpcommon.KeyValue {
+func newKeyValueBool(k string, v bool) otlpcommon.KeyValue {
 	orig := otlpcommon.KeyValue{Key: k}
 	akv := newValue(&orig.Value)
-	akv.SetBoolVal(v)
+	akv.SetBool(v)
 	return orig
 }
 
@@ -636,15 +639,23 @@ func (m Map) PutEmpty(k string) Value {
 	return newValue(&(*m.getOrig())[len(*m.getOrig())-1].Value)
 }
 
+// PutStr performs the Insert or Update action. The Value is
+// inserted to the map that did not originally have the key. The key/value is
+// updated to the map where the key already existed.
+func (m Map) PutStr(k string, v string) {
+	if av, existing := m.Get(k); existing {
+		av.SetStr(v)
+	} else {
+		*m.getOrig() = append(*m.getOrig(), newKeyValueString(k, v))
+	}
+}
+
 // PutString performs the Insert or Update action. The Value is
 // inserted to the map that did not originally have the key. The key/value is
 // updated to the map where the key already existed.
+// Deprecated: [0.62.0] Use PutStr instead.
 func (m Map) PutString(k string, v string) {
-	if av, existing := m.Get(k); existing {
-		av.SetStringVal(v)
-	} else {
-		*m.getOrig() = append(*m.getOrig(), newAttributeKeyValueString(k, v))
-	}
+	m.PutStr(k, v)
 }
 
 // PutInt performs the Insert or Update action. The int Value is
@@ -652,9 +663,9 @@ func (m Map) PutString(k string, v string) {
 // updated to the map where the key already existed.
 func (m Map) PutInt(k string, v int64) {
 	if av, existing := m.Get(k); existing {
-		av.SetIntVal(v)
+		av.SetInt(v)
 	} else {
-		*m.getOrig() = append(*m.getOrig(), newAttributeKeyValueInt(k, v))
+		*m.getOrig() = append(*m.getOrig(), newKeyValueInt(k, v))
 	}
 }
 
@@ -663,9 +674,9 @@ func (m Map) PutInt(k string, v int64) {
 // updated to the map where the key already existed.
 func (m Map) PutDouble(k string, v float64) {
 	if av, existing := m.Get(k); existing {
-		av.SetDoubleVal(v)
+		av.SetDouble(v)
 	} else {
-		*m.getOrig() = append(*m.getOrig(), newAttributeKeyValueDouble(k, v))
+		*m.getOrig() = append(*m.getOrig(), newKeyValueDouble(k, v))
 	}
 }
 
@@ -674,9 +685,9 @@ func (m Map) PutDouble(k string, v float64) {
 // updated to the map where the key already existed.
 func (m Map) PutBool(k string, v bool) {
 	if av, existing := m.Get(k); existing {
-		av.SetBoolVal(v)
+		av.SetBool(v)
 	} else {
-		*m.getOrig() = append(*m.getOrig(), newAttributeKeyValueBool(k, v))
+		*m.getOrig() = append(*m.getOrig(), newKeyValueBool(k, v))
 	}
 }
 

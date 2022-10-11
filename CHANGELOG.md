@@ -4,6 +4,40 @@
 
 ### 🛑 Breaking changes 🛑
 
+- Delete deprecated `go.opentelemetry.io/collector/service/featuregate`. (#6178)
+- Delete deprecated `pmetric.OptionalType`. (#6178)
+- Delete deprecated `ptrace.Span[Link]?.TraceStateStruct`. (#6178)
+- Delete deprecated `pcommon.NewValueBytesEmpty`. (#6178)
+- Delete deprecated `pmetric.MetricDataType`. (#6178)
+- Delete deprecated `pmetric.Metric.DataType()`. (#6178)
+- Delete deprecated `pmetric.NumberDataPoint.[Set]?[Int|Double]Val()`. (#6178)
+- Delete deprecated `pmetric.Exemplar.[Set]?[Int|Double]Val()`. (#6178)
+- Delete deprecated `p[metric|log|trace]otlp.[Client|Server]`. (#6178)
+- Delete deprecated pdata Clone methods. (#6178)
+- Delete deprecated `pcommon.Value` getter/setter methods with `Val` suffix. (#6178)
+- Delete deprecated `StringVal` and `SetStringVal` methods. (#6178)
+- Delete deprecated `ValueTypeString` method. (#6178)
+- Change AggregationTemporality.String to simpler, easier to read. (#6117)
+
+### 🚩 Deprecations 🚩
+
+- Deprecate `p[metric|log|trace]otlp.RegiserServer` in favor of `p[metric|log|trace]otlp.RegiserGRPCServer` (#6180)
+- Deprecate `pcommon.Map.PutString` in favor of `pcommon.Map.PutStr` (#6210)
+- Deprecate `pcommon.NewValueString` in favor of `pcommon.NewValueStr` (#6209)
+
+### 💡 Enhancements 💡
+
+- Add config marshaler (#5566)
+- Add semantic conventions for specification v1.10-v1.13 (#6213)
+- `receiver/otlp`: Make logs related to gRCPC and HTTP server startup clearer (#6174)
+- Add prometheus metric prefix and constant service attributes to Collector's own telemetry when using OpenTelemetry for internal telemetry (#6223)
+- `exporter/logging`: Apply consistent rendering of map values (#6244)
+
+## v0.61.0 Beta
+
+### 🛑 Breaking changes 🛑
+
+- Change `ptrace.Span[Link]?.TraceState` signature to match `ptrace.Span[Link]?.TraceStateStruct` (#6085)
 - Delete deprecated `pmetric.NewMetricDataPointFlagsImmutable` func. (#6097)
 - Delete deprecated `pmetric.*DataPoint.[Set]FlagsImmutable()` funcs. (#6097)
 - Delete deprecated `config.Unmarshalable` interface. (#6084)
@@ -12,6 +46,9 @@
 - Delete deprecated `pcommon.Map.Upsert*` funcs. (#6088)
 - Delete deprecated `pcommon.Map.Update*` funcs. (#6088)
 - Change `pcommon.NewValueBytes` signature to match `pcommon.NewValueBytesEmpty`. (#6088)
+- Delete deprecated `pcommon.Empty[Trace|Span]ID`. (#6098)
+- Delete deprecated `pcommon.[Trace|Span]ID.Bytes()`. (#6098)
+- Delete deprecated `pcommon.New[Trace|Span]ID()`. (#6098)
 - Delete deprecated `pcommon.Value.SetBytesVal`. (#6088)
 - Delete deprecated `pmetric.Metric.SetDataType`. (#6095)
 - Delete deprecated `plog.LogRecord.[Set]FlagStruct` funcs. (#6100)
@@ -23,13 +60,30 @@
 ### 🚩 Deprecations 🚩
 
 - Deprecate `go.opentelemetry.io/collector/service/featuregate` in favor of `go.opentelemetry.io/collector/featuregate`. (#6094)
-- Deprecate pmetric.OptionalType, unused enum type. (#6096)
+- Deprecate `pmetric.OptionalType`, unused enum type. (#6096)
+- Deprecate `ptrace.Span[Link]?.TraceStateStruct` in favor of `ptrace.Span[Link]?.TraceState` (#6085)
 - Deprecate `pcommon.NewValueBytesEmpty` in favor of `pcommon.NewValueBytes` that now has the same signature. (#6105)
+- Deprecate `pmetric.MetricDataType` and related constants in favor of `pmetric.MetricType`. (#6127)
+- Deprecate `pmetric.Metric.DataType()` in favor of `pmetric.Metric.Type()`. (#6127)
+- Deprecate `pmetric.NumberDataPoint.[Set]?[Int|Double]Val()` in favor of `pmetric.NumberDataPoint.[Set]?[Int|Double]Value()`. (#6134)
+- Deprecate `pmetric.Exemplar.[Set]?[Int|Double]Val()` in favor of `pmetric.Exemplar.[Set]?[Int|Double]Value()`. (#6134)
+- Deprecate `p[metric|log|trace]otlp.[Client|Server]` in favor of `p[metric|log|trace]otlp.GRPC[Client|Server]` (#6165)
+- Deprecate pdata Clone methods in favor of CopyTo for consistency with other pdata structs (#6164)
+  - `pmetric.Metrics.Clone` is deprecated in favor of `pmetric.Metrics.CopyTo`
+  - `ptrace.Traces.Clone` is deprecated in favor of `pmetric.Traces.CopyTo`
+  - `plog.Logs.Clone` is deprecated in favor of `plogs.Logs.CopyTo`
+- Rename all `pcommon.Value` getter/setter methods by removing `Val` suffix. (#6092) 
+  - Old methods with `Val` suffix are deprecated.
+  - `StringVal` and `SetStringVal` are deprecated in favor of `Str` and `SetStr` to avoid implementing `fmt.Stringer` interface. 
+  - Therefore, `ValueTypeString` is deprecated in favour of `ValueTypeStr` for consistency.
 
 ### 💡 Enhancements 💡
 
 - Add AppendEmpty and EnsureCapacity method to primitive pdata slices (#6060)
 - Expose `AsRaw` and `FromRaw` `pcommon.Value` methods (#6090)
+- Convert `ValueTypeBytes` attributes in logging exporter (#6153)
+- service.name Resource attribute is added to Collector's own telemetry, defaults to the value of `BuildInfo.Command` and can be overridden in the config (#6152) 
+- Updated how `telemetryInitializer` is created so it's instanced per Collector instance rather than global to the process (#6138)
 
 ## v0.60.0 Beta
 

@@ -44,11 +44,9 @@ func (ms Logs) MoveTo(dest Logs) {
 	*ms.getOrig() = otlpcollectorlog.ExportLogsServiceRequest{}
 }
 
-// Clone returns a copy of Logs.
-func (ms Logs) Clone() Logs {
-	cloneLd := NewLogs()
-	ms.ResourceLogs().CopyTo(cloneLd.ResourceLogs())
-	return cloneLd
+// CopyTo copies all logs from ms to dest.
+func (ms Logs) CopyTo(dest Logs) {
+	ms.ResourceLogs().CopyTo(dest.ResourceLogs())
 }
 
 // LogRecordCount calculates the total number of log records.

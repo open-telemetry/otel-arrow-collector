@@ -115,10 +115,10 @@ func (lr Request) Logs() plog.Logs {
 	return plog.Logs(internal.NewLogs(lr.orig))
 }
 
-// Client is the client API for OTLP-GRPC Logs service.
+// GRPCClient is the client API for OTLP-GRPC Logs service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://godoc.org/google.golang.org/grpc#ClientConn.NewStream.
-type Client interface {
+type GRPCClient interface {
 	// Export plog.Logs to the server.
 	//
 	// For performance reasons, it is recommended to keep this RPC
@@ -131,7 +131,7 @@ type logsClient struct {
 }
 
 // NewClient returns a new Client connected using the given connection.
-func NewClient(cc *grpc.ClientConn) Client {
+func NewClient(cc *grpc.ClientConn) GRPCClient {
 	return &logsClient{rawClient: otlpcollectorlog.NewLogsServiceClient(cc)}
 }
 
@@ -140,8 +140,8 @@ func (c *logsClient) Export(ctx context.Context, request Request, opts ...grpc.C
 	return Response{orig: rsp}, err
 }
 
-// Server is the server API for OTLP gRPC LogsService service.
-type Server interface {
+// GRPCServer is the server API for OTLP gRPC LogsService service.
+type GRPCServer interface {
 	// Export is called every time a new request is received.
 	//
 	// For performance reasons, it is recommended to keep this RPC
@@ -149,13 +149,16 @@ type Server interface {
 	Export(context.Context, Request) (Response, error)
 }
 
-// RegisterServer registers the Server to the grpc.Server.
-func RegisterServer(s *grpc.Server, srv Server) {
+// RegisterGRPCServer registers the Server to the grpc.Server.
+func RegisterGRPCServer(s *grpc.Server, srv GRPCServer) {
 	otlpcollectorlog.RegisterLogsServiceServer(s, &rawLogsServer{srv: srv})
 }
 
+// Deprecated: [0.62.0] Use RegisterGRPCServer instead
+var RegisterServer = RegisterGRPCServer
+
 type rawLogsServer struct {
-	srv Server
+	srv GRPCServer
 }
 
 func (s rawLogsServer) Export(ctx context.Context, request *otlpcollectorlog.ExportLogsServiceRequest) (*otlpcollectorlog.ExportLogsServiceResponse, error) {

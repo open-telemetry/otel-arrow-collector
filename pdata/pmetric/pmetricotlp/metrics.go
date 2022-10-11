@@ -111,10 +111,10 @@ func (mr Request) Metrics() pmetric.Metrics {
 	return pmetric.Metrics(internal.NewMetrics(mr.orig))
 }
 
-// Client is the client API for OTLP-GRPC Metrics service.
+// GRPCClient is the client API for OTLP-GRPC Metrics service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://godoc.org/google.golang.org/grpc#ClientConn.NewStream.
-type Client interface {
+type GRPCClient interface {
 	// Export pmetric.Metrics to the server.
 	//
 	// For performance reasons, it is recommended to keep this RPC
@@ -127,7 +127,7 @@ type metricsClient struct {
 }
 
 // NewClient returns a new Client connected using the given connection.
-func NewClient(cc *grpc.ClientConn) Client {
+func NewClient(cc *grpc.ClientConn) GRPCClient {
 	return &metricsClient{rawClient: otlpcollectormetrics.NewMetricsServiceClient(cc)}
 }
 
@@ -136,8 +136,8 @@ func (c *metricsClient) Export(ctx context.Context, request Request, opts ...grp
 	return Response{orig: rsp}, err
 }
 
-// Server is the server API for OTLP gRPC MetricsService service.
-type Server interface {
+// GRPCServer is the server API for OTLP gRPC MetricsService service.
+type GRPCServer interface {
 	// Export is called every time a new request is received.
 	//
 	// For performance reasons, it is recommended to keep this RPC
@@ -145,13 +145,16 @@ type Server interface {
 	Export(context.Context, Request) (Response, error)
 }
 
-// RegisterServer registers the Server to the grpc.Server.
-func RegisterServer(s *grpc.Server, srv Server) {
+// RegisterGRPCServer registers the GRPCServer to the grpc.Server.
+func RegisterGRPCServer(s *grpc.Server, srv GRPCServer) {
 	otlpcollectormetrics.RegisterMetricsServiceServer(s, &rawMetricsServer{srv: srv})
 }
 
+// Deprecated: [0.62.0] Use RegisterGRPCServer instead
+var RegisterServer = RegisterGRPCServer
+
 type rawMetricsServer struct {
-	srv Server
+	srv GRPCServer
 }
 
 func (s rawMetricsServer) Export(ctx context.Context, request *otlpcollectormetrics.ExportMetricsServiceRequest) (*otlpcollectormetrics.ExportMetricsServiceResponse, error) {

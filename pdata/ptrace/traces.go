@@ -44,11 +44,9 @@ func (ms Traces) MoveTo(dest Traces) {
 	*ms.getOrig() = otlpcollectortrace.ExportTraceServiceRequest{}
 }
 
-// Clone returns a copy of Traces.
-func (ms Traces) Clone() Traces {
-	cloneTd := NewTraces()
-	ms.ResourceSpans().CopyTo(cloneTd.ResourceSpans())
-	return cloneTd
+// CopyTo copies all logs from ms to dest.
+func (ms Traces) CopyTo(dest Traces) {
+	ms.ResourceSpans().CopyTo(dest.ResourceSpans())
 }
 
 // SpanCount calculates the total number of spans.
@@ -68,34 +66,6 @@ func (ms Traces) SpanCount() int {
 // ResourceSpans returns the ResourceSpansSlice associated with this Metrics.
 func (ms Traces) ResourceSpans() ResourceSpansSlice {
 	return newResourceSpansSlice(&ms.getOrig().ResourceSpans)
-}
-
-// Deprecated: [v0.60.0] use pcommon.TraceState.
-type TraceState string
-
-const (
-	// Deprecated: [v0.60.0] use pcommon.TraceState.AsRaw() and compare with empty string.
-	TraceStateEmpty TraceState = ""
-)
-
-// Deprecated: [v0.60.0] use TraceStateStruct().AsRaw().
-func (ms Span) TraceState() TraceState {
-	return TraceState(ms.getOrig().TraceState)
-}
-
-// Deprecated: [v0.60.0] use TraceStateStruct().FromRaw(val).
-func (ms Span) SetTraceState(v TraceState) {
-	ms.getOrig().TraceState = string(v)
-}
-
-// Deprecated: [v0.60.0] use TraceStateStruct().AsRaw().
-func (ms SpanLink) TraceState() TraceState {
-	return TraceState(ms.getOrig().TraceState)
-}
-
-// Deprecated: [v0.60.0] use TraceStateStruct().FromRaw(val).
-func (ms SpanLink) SetTraceState(v TraceState) {
-	ms.getOrig().TraceState = string(v)
 }
 
 // SpanKind is the type of span. Can be used to specify additional relationships between spans

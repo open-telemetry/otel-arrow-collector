@@ -37,11 +37,9 @@ func NewMetrics() Metrics {
 	return newMetrics(&otlpcollectormetrics.ExportMetricsServiceRequest{})
 }
 
-// Clone returns a copy of MetricData.
-func (ms Metrics) Clone() Metrics {
-	cloneMd := NewMetrics()
-	ms.ResourceMetrics().CopyTo(cloneMd.ResourceMetrics())
-	return cloneMd
+// CopyTo copies all metrics from ms to dest.
+func (ms Metrics) CopyTo(dest Metrics) {
+	ms.ResourceMetrics().CopyTo(dest.ResourceMetrics())
 }
 
 // MoveTo moves all properties from the current struct to dest
@@ -82,16 +80,16 @@ func (ms Metrics) DataPointCount() (dataPointCount int) {
 			ms := ilm.Metrics()
 			for k := 0; k < ms.Len(); k++ {
 				m := ms.At(k)
-				switch m.DataType() {
-				case MetricDataTypeGauge:
+				switch m.Type() {
+				case MetricTypeGauge:
 					dataPointCount += m.Gauge().DataPoints().Len()
-				case MetricDataTypeSum:
+				case MetricTypeSum:
 					dataPointCount += m.Sum().DataPoints().Len()
-				case MetricDataTypeHistogram:
+				case MetricTypeHistogram:
 					dataPointCount += m.Histogram().DataPoints().Len()
-				case MetricDataTypeExponentialHistogram:
+				case MetricTypeExponentialHistogram:
 					dataPointCount += m.ExponentialHistogram().DataPoints().Len()
-				case MetricDataTypeSummary:
+				case MetricTypeSummary:
 					dataPointCount += m.Summary().DataPoints().Len()
 				}
 			}
@@ -100,32 +98,32 @@ func (ms Metrics) DataPointCount() (dataPointCount int) {
 	return
 }
 
-// MetricDataType specifies the type of data in a Metric.
-type MetricDataType int32
+// MetricType specifies the type of data in a Metric.
+type MetricType int32
 
 const (
-	MetricDataTypeNone MetricDataType = iota
-	MetricDataTypeGauge
-	MetricDataTypeSum
-	MetricDataTypeHistogram
-	MetricDataTypeExponentialHistogram
-	MetricDataTypeSummary
+	MetricTypeNone MetricType = iota
+	MetricTypeGauge
+	MetricTypeSum
+	MetricTypeHistogram
+	MetricTypeExponentialHistogram
+	MetricTypeSummary
 )
 
-// String returns the string representation of the MetricDataType.
-func (mdt MetricDataType) String() string {
+// String returns the string representation of the MetricType.
+func (mdt MetricType) String() string {
 	switch mdt {
-	case MetricDataTypeNone:
+	case MetricTypeNone:
 		return "None"
-	case MetricDataTypeGauge:
+	case MetricTypeGauge:
 		return "Gauge"
-	case MetricDataTypeSum:
+	case MetricTypeSum:
 		return "Sum"
-	case MetricDataTypeHistogram:
+	case MetricTypeHistogram:
 		return "Histogram"
-	case MetricDataTypeExponentialHistogram:
+	case MetricTypeExponentialHistogram:
 		return "ExponentialHistogram"
-	case MetricDataTypeSummary:
+	case MetricTypeSummary:
 		return "Summary"
 	}
 	return ""
@@ -146,7 +144,15 @@ const (
 
 // String returns the string representation of the MetricAggregationTemporality.
 func (at MetricAggregationTemporality) String() string {
-	return otlpmetrics.AggregationTemporality(at).String()
+	switch at {
+	case MetricAggregationTemporalityUnspecified:
+		return "Unspecified"
+	case MetricAggregationTemporalityDelta:
+		return "Delta"
+	case MetricAggregationTemporalityCumulative:
+		return "Cumulative"
+	}
+	return ""
 }
 
 // NumberDataPointValueType specifies the type of NumberDataPoint value.
@@ -188,27 +194,6 @@ func (nt ExemplarValueType) String() string {
 	case ExemplarValueTypeInt:
 		return "Int"
 	case ExemplarValueTypeDouble:
-		return "Double"
-	}
-	return ""
-}
-
-// Deprecated: [v0.61.0] not used, will be deleted in next release.
-type OptionalType int32
-
-const (
-	// Deprecated: [v0.61.0] not used, will be deleted in next release.
-	OptionalTypeNone OptionalType = iota
-	// Deprecated: [v0.61.0] not used, will be deleted in next release.
-	OptionalTypeDouble
-)
-
-// Deprecated: [v0.61.0] not used, will be deleted in next release.
-func (ot OptionalType) String() string {
-	switch ot {
-	case OptionalTypeNone:
-		return "None"
-	case OptionalTypeDouble:
 		return "Double"
 	}
 	return ""

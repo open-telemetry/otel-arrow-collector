@@ -50,10 +50,10 @@ func fillLogOne(log plog.LogRecord) {
 	log.SetTraceID([16]byte{0x08, 0x04, 0x02, 0x01})
 
 	attrs := log.Attributes()
-	attrs.PutString("app", "server")
+	attrs.PutStr("app", "server")
 	attrs.PutInt("instance_num", 1)
 
-	log.Body().SetStringVal("This is a log message")
+	log.Body().SetStr("This is a log message")
 }
 
 func fillLogTwo(log plog.LogRecord) {
@@ -63,8 +63,8 @@ func fillLogTwo(log plog.LogRecord) {
 	log.SetSeverityText("Info")
 
 	attrs := log.Attributes()
-	attrs.PutString("customer", "acme")
-	attrs.PutString("env", "dev")
+	attrs.PutStr("customer", "acme")
+	attrs.PutStr("env", "dev")
 
-	log.Body().SetStringVal("something happened")
+	log.Body().SetStr("something happened")
 }
