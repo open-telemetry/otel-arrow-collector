@@ -227,9 +227,6 @@ func (r *otlpReceiver) registerMetricsConsumer(mc consumer.Metrics) error {
 			}
 		})
 	}
-	if r.cfg.Arrow != nil && r.cfg.Arrow.Enabled {
-
-	}
 	return nil
 }
 
