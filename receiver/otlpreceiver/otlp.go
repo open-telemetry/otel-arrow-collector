@@ -132,7 +132,7 @@ func (r *otlpReceiver) startProtocolServers(host component.Host) error {
 		if r.cfg.Arrow != nil && r.cfg.Arrow.Enabled {
 			r.arrowReceiver = arrow.New(r.cfg.ID(), arrow.Consumers(r), r.settings)
 
-			arrowpb.RegisterArrowServiceServer(r.serverGRPC, r.arrowReceiver)
+			arrowpb.RegisterEventsServiceServer(r.serverGRPC, r.arrowReceiver)
 		}
 
 		err = r.startGRPCServer(r.cfg.GRPC, host)

@@ -7,15 +7,11 @@ import (
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/obsreport"
-	"go.opentelemetry.io/collector/pdata/plog"
-	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 
 	arrowpb "github.com/lquerel/otel-arrow-adapter/api/collector/arrow/v1"
 	batchEvent "github.com/lquerel/otel-arrow-adapter/pkg/otel/batch_event"
-	"github.com/lquerel/otel-arrow-adapter/pkg/otel/logs"
-	"github.com/lquerel/otel-arrow-adapter/pkg/otel/metrics"
-	"github.com/lquerel/otel-arrow-adapter/pkg/otel/trace"
+	"github.com/lquerel/otel-arrow-adapter/pkg/otel/traces"
 )
 
 const (
@@ -31,7 +27,7 @@ type Consumers interface {
 
 type Receiver struct {
 	Consumers
-	arrowpb.UnimplementedArrowServiceServer
+	arrowpb.UnimplementedEventsServiceServer
 
 	obsrecv       *obsreport.Receiver
 	arrowConsumer *batchEvent.Consumer
@@ -54,8 +50,14 @@ func New(
 	}
 }
 
-func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowService_ArrowStreamServer) error {
+func (r *Receiver) EventsStream(serverStream arrowpb.EventsService_EventStreamServer) error {
 	ctx := serverStream.Context()
+
+	var traceProducer *traces.OtlpProducer
+
+	if r.Traces() != nil {
+		traceProducer = traces.NewOtlpProducer()
+	}
 
 	for {
 		select {
@@ -63,7 +65,7 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowService_ArrowStreamServ
 			return ctx.Err()
 		}
 
-		resp := &arrowpb.ArrowStatus{}
+		resp := &arrowpb.BatchStatus{}
 
 		// Note: How often to send responses?  We can loop here.
 		req, err := serverStream.Recv()
@@ -76,39 +78,24 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowService_ArrowStreamServ
 		status := &arrowpb.StatusMessage{
 			BatchId: req.GetBatchId(),
 		}
-		if err != nil {
+		if err == nil {
 			// TODO: error handling is not great here, figure this out.
 			for _, msg := range messages {
 				switch msg.PayloadType() {
-				case arrowpb.PayloadType_METRICS:
-					if r.Metrics() == nil {
-						// TODO: set ErrorCode not retryable, e.g.,
-						err = fmt.Errorf("no metrics consumer")
-						continue
-					}
-					var otlp pmetric.Metrics
-					if otlp, err = metrics.ArrowRecordsToOtlpMetrics(msg.Record()); err == nil {
-						err = r.Metrics().ConsumeMetrics(ctx, otlp)
-					}
-
-				case arrowpb.PayloadType_LOGS:
-					if r.Logs() == nil {
-						err = fmt.Errorf("no logs consumer")
-						continue
-					}
-					var otlp plog.Logs
-					if otlp, err = logs.ArrowRecordsToOtlpLogs(msg.Record()); err == nil {
-						err = r.Logs().ConsumeLogs(ctx, otlp)
-					}
-
-				case arrowpb.PayloadType_SPANS:
-					if r.Traces() == nil {
+				case arrowpb.OtlpArrowPayloadType_METRICS:
+					err = fmt.Errorf("no metrics consumer")
+				case arrowpb.OtlpArrowPayloadType_LOGS:
+					err = fmt.Errorf("no logs consumer")
+				case arrowpb.OtlpArrowPayloadType_SPANS:
+					if traceProducer == nil {
 						err = fmt.Errorf("no spans consumer")
 						continue
 					}
-					var otlp ptrace.Traces
-					if otlp, err = trace.ArrowRecordsToOtlpTrace(msg.Record()); err == nil {
-						err = r.Traces().ConsumeTraces(ctx, otlp)
+					var otlp []ptrace.Traces
+					if otlp, err = traceProducer.ProduceFrom(msg.Record()); err == nil {
+						for _, batch := range otlp {
+							err = r.Traces().ConsumeTraces(ctx, batch)
+						}
 					}
 
 				default:

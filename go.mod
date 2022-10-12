@@ -10,7 +10,7 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/klauspost/compress v1.15.11
 	github.com/knadh/koanf v1.4.3
-	github.com/lquerel/otel-arrow-adapter v0.0.0-20221006212838-28eaea4def73
+	github.com/lquerel/otel-arrow-adapter v0.0.0-20221012175720-a5ac55c73543
 	github.com/magiconair/properties v1.8.6
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/mostynb/go-grpc-compression v1.1.17
@@ -22,7 +22,7 @@ require (
 	github.com/spf13/cobra v1.5.0
 	github.com/stretchr/testify v1.8.0
 	go.opencensus.io v0.23.0
-	go.opentelemetry.io/collector/pdata v0.61.0
+	go.opentelemetry.io/collector/pdata v0.61.1-0.20221006213454-09221fd266f4
 	go.opentelemetry.io/collector/semconv v0.61.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.36.1
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.36.1

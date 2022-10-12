@@ -378,6 +378,12 @@ github.com/lightstep/lightstep-tracer-common/golang/gogo v0.0.0-20190605223551-b
 github.com/lightstep/lightstep-tracer-go v0.18.1/go.mod h1:jlF1pusYV4pidLvZ+XD0UBX0ZE6WURAspgAczcDHrL4=
 github.com/lquerel/otel-arrow-adapter v0.0.0-20221006212838-28eaea4def73 h1:MPY2vKXJIuo2pNqh8PvyLOvyL16o7EGgsNfOc++Iwjc=
 github.com/lquerel/otel-arrow-adapter v0.0.0-20221006212838-28eaea4def73/go.mod h1:cg0xXiuLyquDnXw0O/8yYuwut/2yqx/2o/SUAHPT+Hc=
+github.com/lquerel/otel-arrow-adapter v0.0.0-20221011234843-95117bc9d380 h1:i3ygh6jqaNZ+3qb1o4PBKGwM94dHJL4XyYZoQd9r+1c=
+github.com/lquerel/otel-arrow-adapter v0.0.0-20221011234843-95117bc9d380/go.mod h1:0DKvQhIdr7+736Zt0KNWkX002PhUqc8j2UPa1H293/o=
+github.com/lquerel/otel-arrow-adapter v0.0.0-20221012172638-e916281f7a7f h1:TE8Pn7e1zZZVAMXGx6ICTvzdsoDX4KKljvB/BdrEdZk=
+github.com/lquerel/otel-arrow-adapter v0.0.0-20221012172638-e916281f7a7f/go.mod h1:CUjXcfLkpzK96cfFz1bwedCggfGftWZ9SQzaui7uIeM=
+github.com/lquerel/otel-arrow-adapter v0.0.0-20221012175720-a5ac55c73543 h1:xEzzJo0gebTPDfiQ9mfQa9sXLeI/WYkllrRP9j1oPUE=
+github.com/lquerel/otel-arrow-adapter v0.0.0-20221012175720-a5ac55c73543/go.mod h1:CUjXcfLkpzK96cfFz1bwedCggfGftWZ9SQzaui7uIeM=
 github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 h1:6E+4a0GO5zZEnZ81pIr0yLvtUWk2if982qA3F3QD6H4=
 github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0/go.mod h1:zJYVVT2jmtg6P3p1VtQj7WsuWi/y4VnjVBn7F8KPB3I=
 github.com/lyft/protoc-gen-validate v0.0.13/go.mod h1:XbGvPuh87YZc5TdIa2/I4pLk0QoUACkjt2znoq26NVQ=
