@@ -61,3 +61,7 @@ func (r *Receiver) Export(ctx context.Context, req plogotlp.Request) (plogotlp.R
 
 	return plogotlp.NewResponse(), err
 }
+
+func (r *Receiver) Consumer() consumer.Logs {
+	return r.nextConsumer
+}

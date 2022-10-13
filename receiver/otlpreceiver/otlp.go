@@ -32,9 +32,12 @@ import (
 	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
 	"go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp"
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
+	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/arrow"
 	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/logs"
 	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/metrics"
 	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/trace"
+
+	arrowpb "github.com/lquerel/otel-arrow-adapter/api/collector/arrow/v1"
 )
 
 // otlpReceiver is the type that exposes Trace and Metrics reception.
@@ -47,6 +50,7 @@ type otlpReceiver struct {
 	traceReceiver   *trace.Receiver
 	metricsReceiver *metrics.Receiver
 	logReceiver     *logs.Receiver
+	arrowReceiver   *arrow.Receiver
 	shutdownWG      sync.WaitGroup
 
 	settings component.ReceiverCreateSettings
@@ -123,6 +127,12 @@ func (r *otlpReceiver) startProtocolServers(host component.Host) error {
 
 		if r.logReceiver != nil {
 			plogotlp.RegisterGRPCServer(r.serverGRPC, r.logReceiver)
+		}
+
+		if r.cfg.Arrow != nil && r.cfg.Arrow.Enabled {
+			r.arrowReceiver = arrow.New(r.cfg.ID(), arrow.Consumers(r), r.settings)
+
+			arrowpb.RegisterEventsServiceServer(r.serverGRPC, r.arrowReceiver)
 		}
 
 		err = r.startGRPCServer(r.cfg.GRPC, host)
@@ -252,4 +262,27 @@ func handleUnmatchedMethod(resp http.ResponseWriter) {
 func handleUnmatchedContentType(resp http.ResponseWriter) {
 	status := http.StatusUnsupportedMediaType
 	writeResponse(resp, "text/plain", status, []byte(fmt.Sprintf("%v unsupported media type, supported: [%s, %s]", status, jsonContentType, pbContentType)))
+}
+
+var _ arrow.Consumers = &otlpReceiver{}
+
+func (r *otlpReceiver) Traces() consumer.Traces {
+	if r.traceReceiver == nil {
+		return nil
+	}
+	return r.traceReceiver.Consumer()
+}
+
+func (r *otlpReceiver) Metrics() consumer.Metrics {
+	if r.metricsReceiver == nil {
+		return nil
+	}
+	return r.metricsReceiver.Consumer()
+}
+
+func (r *otlpReceiver) Logs() consumer.Logs {
+	if r.logReceiver == nil {
+		return nil
+	}
+	return r.logReceiver.Consumer()
 }

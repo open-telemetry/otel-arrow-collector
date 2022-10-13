@@ -32,8 +32,14 @@ const (
 
 // Protocols is the configuration for the supported protocols.
 type Protocols struct {
-	GRPC *configgrpc.GRPCServerSettings `mapstructure:"grpc"`
-	HTTP *confighttp.HTTPServerSettings `mapstructure:"http"`
+	GRPC  *configgrpc.GRPCServerSettings `mapstructure:"grpc"`
+	HTTP  *confighttp.HTTPServerSettings `mapstructure:"http"`
+	Arrow *ArrowSettings                 `mapstructure:"arrow"`
+}
+
+// ArrowSettings
+type ArrowSettings struct {
+	Enabled bool `mapstructure:"enabled"`
 }
 
 // Config defines configuration for OTLP receiver.
@@ -51,6 +57,9 @@ func (cfg *Config) Validate() error {
 	if cfg.GRPC == nil &&
 		cfg.HTTP == nil {
 		return errors.New("must specify at least one protocol when using the OTLP receiver")
+	}
+	if cfg.Arrow != nil && cfg.Arrow.Enabled && cfg.GRPC == nil {
+		return errors.New("must specify at gRPC protocol when using the OTLP+Arrow receiver")
 	}
 	return nil
 }
