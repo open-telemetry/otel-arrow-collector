@@ -23,6 +23,7 @@ import (
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
+	"go.opentelemetry.io/collector/exporter/otlpexporter/internal/arrow"
 )
 
 const (
@@ -66,13 +67,33 @@ func createTracesExporter(
 	if err != nil {
 		return nil, err
 	}
-	oCfg := cfg.(*Config)
+	if oce.config.Arrow != nil && oce.config.Arrow.Enabled {
+		return arrow.NewTracesExporter(
+			ctx,
+			set,
+			cfg,
+			oce.config.ExporterSettings,
+			oce.config.TimeoutSettings,
+			oce.config.RetrySettings,
+			oce.config.QueueSettings,
+			oce.config.GRPCClientSettings,
+			oce.createStandardTracesExporter,
+		)
+	}
+	return oce.createStandardTracesExporter(ctx, set, cfg)
+}
+
+func (oce *exporter) createStandardTracesExporter(
+	ctx context.Context,
+	set component.ExporterCreateSettings,
+	cfg config.Exporter,
+) (component.TracesExporter, error) {
 	return exporterhelper.NewTracesExporter(ctx, set, cfg,
 		oce.pushTraces,
 		exporterhelper.WithCapabilities(consumer.Capabilities{MutatesData: false}),
-		exporterhelper.WithTimeout(oCfg.TimeoutSettings),
-		exporterhelper.WithRetry(oCfg.RetrySettings),
-		exporterhelper.WithQueue(oCfg.QueueSettings),
+		exporterhelper.WithTimeout(oce.config.TimeoutSettings),
+		exporterhelper.WithRetry(oce.config.RetrySettings),
+		exporterhelper.WithQueue(oce.config.QueueSettings),
 		exporterhelper.WithStart(oce.start),
 		exporterhelper.WithShutdown(oce.shutdown))
 }
@@ -86,13 +107,33 @@ func createMetricsExporter(
 	if err != nil {
 		return nil, err
 	}
-	oCfg := cfg.(*Config)
+	if oce.config.Arrow != nil && oce.config.Arrow.Enabled {
+		return arrow.NewMetricsExporter(
+			ctx,
+			set,
+			cfg,
+			oce.config.ExporterSettings,
+			oce.config.TimeoutSettings,
+			oce.config.RetrySettings,
+			oce.config.QueueSettings,
+			oce.config.GRPCClientSettings,
+			oce.createStandardMetricsExporter,
+		)
+	}
+	return oce.createStandardMetricsExporter(ctx, set, cfg)
+}
+
+func (oce *exporter) createStandardMetricsExporter(
+	ctx context.Context,
+	set component.ExporterCreateSettings,
+	cfg config.Exporter,
+) (component.MetricsExporter, error) {
 	return exporterhelper.NewMetricsExporter(ctx, set, cfg,
 		oce.pushMetrics,
 		exporterhelper.WithCapabilities(consumer.Capabilities{MutatesData: false}),
-		exporterhelper.WithTimeout(oCfg.TimeoutSettings),
-		exporterhelper.WithRetry(oCfg.RetrySettings),
-		exporterhelper.WithQueue(oCfg.QueueSettings),
+		exporterhelper.WithTimeout(oce.config.TimeoutSettings),
+		exporterhelper.WithRetry(oce.config.RetrySettings),
+		exporterhelper.WithQueue(oce.config.QueueSettings),
 		exporterhelper.WithStart(oce.start),
 		exporterhelper.WithShutdown(oce.shutdown),
 	)
@@ -107,13 +148,33 @@ func createLogsExporter(
 	if err != nil {
 		return nil, err
 	}
-	oCfg := cfg.(*Config)
+	if oce.config.Arrow != nil && oce.config.Arrow.Enabled {
+		return arrow.NewLogsExporter(
+			ctx,
+			set,
+			cfg,
+			oce.config.ExporterSettings,
+			oce.config.TimeoutSettings,
+			oce.config.RetrySettings,
+			oce.config.QueueSettings,
+			oce.config.GRPCClientSettings,
+			oce.createStandardLogsExporter,
+		)
+	}
+	return oce.createStandardLogsExporter(ctx, set, cfg)
+}
+
+func (oce *exporter) createStandardLogsExporter(
+	ctx context.Context,
+	set component.ExporterCreateSettings,
+	cfg config.Exporter,
+) (component.LogsExporter, error) {
 	return exporterhelper.NewLogsExporter(ctx, set, cfg,
 		oce.pushLogs,
 		exporterhelper.WithCapabilities(consumer.Capabilities{MutatesData: false}),
-		exporterhelper.WithTimeout(oCfg.TimeoutSettings),
-		exporterhelper.WithRetry(oCfg.RetrySettings),
-		exporterhelper.WithQueue(oCfg.QueueSettings),
+		exporterhelper.WithTimeout(oce.config.TimeoutSettings),
+		exporterhelper.WithRetry(oce.config.RetrySettings),
+		exporterhelper.WithQueue(oce.config.QueueSettings),
 		exporterhelper.WithStart(oce.start),
 		exporterhelper.WithShutdown(oce.shutdown),
 	)

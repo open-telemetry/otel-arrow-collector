@@ -30,6 +30,13 @@ type Config struct {
 	exporterhelper.RetrySettings   `mapstructure:"retry_on_failure"`
 
 	configgrpc.GRPCClientSettings `mapstructure:",squash"` // squash ensures fields are correctly decoded in embedded struct.
+
+	Arrow *ArrowSettings `mapstructure:"arrow"`
+}
+
+// ArrowSettings
+type ArrowSettings struct {
+	Enabled bool `mapstructure:"enabled"`
 }
 
 var _ config.Exporter = (*Config)(nil)
