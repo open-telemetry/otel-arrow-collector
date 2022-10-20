@@ -51,7 +51,7 @@ type exporter struct {
 	metadata       metadata.MD
 	callOptions    []grpc.CallOption
 
-	settings component.TelemetrySettings
+	settings component.ExporterCreateSettings
 
 	// Default user-agent header.
 	userAgent string
@@ -59,7 +59,7 @@ type exporter struct {
 
 // Crete new exporter and start it. The exporter will begin connecting but
 // this function may return before the connection is established.
-func newExporter(cfg config.Exporter, set component.ExporterCreateSettings) (*exporter, error) {
+func newExporter(cfg config.Exporter, settings component.ExporterCreateSettings) (*exporter, error) {
 	oCfg := cfg.(*Config)
 
 	if oCfg.Endpoint == "" {
@@ -67,24 +67,30 @@ func newExporter(cfg config.Exporter, set component.ExporterCreateSettings) (*ex
 	}
 
 	userAgent := fmt.Sprintf("%s/%s (%s/%s)",
-		set.BuildInfo.Description, set.BuildInfo.Version, runtime.GOOS, runtime.GOARCH)
+		settings.BuildInfo.Description, settings.BuildInfo.Version, runtime.GOOS, runtime.GOARCH)
 
-	return &exporter{config: oCfg, settings: set.TelemetrySettings, userAgent: userAgent}, nil
+	if oCfg.Arrow != nil && oCfg.Arrow.Enabled {
+		userAgent += fmt.Sprint(" arrow/enabled (...)") // TODO
+	}
+
+	return &exporter{config: oCfg, settings: settings, userAgent: userAgent}, nil
 }
 
 // start actually creates the gRPC connection. The client construction is deferred till this point as this
 // is the only place we get hold of Extensions which are required to construct auth round tripper.
-func (e *exporter) start(ctx context.Context, host component.Host) (err error) {
-	dialOpts, err := e.config.GRPCClientSettings.ToDialOptions(host, e.settings)
+func (e *exporter) start(ctx context.Context, host component.Host) error {
+	dialOpts, err := e.config.GRPCClientSettings.ToDialOptions(host, e.settings.TelemetrySettings)
 	if err != nil {
 		return err
 	}
 	dialOpts = append(dialOpts, grpc.WithUserAgent(e.userAgent))
 
-	if e.clientConn, err = grpc.DialContext(ctx, e.config.GRPCClientSettings.SanitizedEndpoint(), dialOpts...); err != nil {
+	cc, err := grpc.DialContext(ctx, e.config.GRPCClientSettings.SanitizedEndpoint(), dialOpts...)
+	if err != nil {
 		return err
 	}
 
+	e.clientConn = cc
 	e.traceExporter = ptraceotlp.NewClient(e.clientConn)
 	e.metricExporter = pmetricotlp.NewClient(e.clientConn)
 	e.logExporter = plogotlp.NewClient(e.clientConn)
@@ -93,7 +99,7 @@ func (e *exporter) start(ctx context.Context, host component.Host) (err error) {
 		grpc.WaitForReady(e.config.GRPCClientSettings.WaitForReady),
 	}
 
-	return
+	return nil
 }
 
 func (e *exporter) shutdown(context.Context) error {

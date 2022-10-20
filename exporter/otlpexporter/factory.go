@@ -23,7 +23,7 @@ import (
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
-	"go.opentelemetry.io/collector/exporter/otlpexporter/internal/arrow"
+	//"go.opentelemetry.io/collector/exporter/otlpexporter/internal/arrow"
 )
 
 const (
@@ -58,6 +58,22 @@ func createDefaultConfig() config.Exporter {
 	}
 }
 
+func (oce *exporter) settingsOpts() []exporterhelper.Option {
+	return []exporterhelper.Option{
+		exporterhelper.WithCapabilities(consumer.Capabilities{MutatesData: false}),
+		exporterhelper.WithTimeout(oce.config.TimeoutSettings),
+		exporterhelper.WithRetry(oce.config.RetrySettings),
+		exporterhelper.WithQueue(oce.config.QueueSettings),
+	}
+}
+
+func (oce *exporter) startShutdownOpts() []exporterhelper.Option {
+	return []exporterhelper.Option{
+		exporterhelper.WithStart(oce.start),
+		exporterhelper.WithShutdown(oce.shutdown),
+	}
+}
+
 func createTracesExporter(
 	ctx context.Context,
 	set component.ExporterCreateSettings,
@@ -68,34 +84,19 @@ func createTracesExporter(
 		return nil, err
 	}
 	if oce.config.Arrow != nil && oce.config.Arrow.Enabled {
-		return arrow.NewTracesExporter(
-			ctx,
-			set,
-			cfg,
-			oce.config.ExporterSettings,
-			oce.config.TimeoutSettings,
-			oce.config.RetrySettings,
-			oce.config.QueueSettings,
-			oce.config.GRPCClientSettings,
-			oce.createStandardTracesExporter,
-		)
+		return oce.newArrowTracesExporter(ctx)
 	}
-	return oce.createStandardTracesExporter(ctx, set, cfg)
+	return oce.createStandardTracesExporter(ctx, oce.startShutdownOpts())
 }
 
 func (oce *exporter) createStandardTracesExporter(
 	ctx context.Context,
-	set component.ExporterCreateSettings,
-	cfg config.Exporter,
+	opts []exporterhelper.Option,
 ) (component.TracesExporter, error) {
-	return exporterhelper.NewTracesExporter(ctx, set, cfg,
+	return exporterhelper.NewTracesExporter(ctx, oce.settings, oce.config,
 		oce.pushTraces,
-		exporterhelper.WithCapabilities(consumer.Capabilities{MutatesData: false}),
-		exporterhelper.WithTimeout(oce.config.TimeoutSettings),
-		exporterhelper.WithRetry(oce.config.RetrySettings),
-		exporterhelper.WithQueue(oce.config.QueueSettings),
-		exporterhelper.WithStart(oce.start),
-		exporterhelper.WithShutdown(oce.shutdown))
+		append(oce.settingsOpts(), opts...)...,
+	)
 }
 
 func createMetricsExporter(
@@ -108,34 +109,18 @@ func createMetricsExporter(
 		return nil, err
 	}
 	if oce.config.Arrow != nil && oce.config.Arrow.Enabled {
-		return arrow.NewMetricsExporter(
-			ctx,
-			set,
-			cfg,
-			oce.config.ExporterSettings,
-			oce.config.TimeoutSettings,
-			oce.config.RetrySettings,
-			oce.config.QueueSettings,
-			oce.config.GRPCClientSettings,
-			oce.createStandardMetricsExporter,
-		)
+		return oce.newArrowMetricsExporter(ctx)
 	}
-	return oce.createStandardMetricsExporter(ctx, set, cfg)
+	return oce.createStandardMetricsExporter(ctx, oce.startShutdownOpts())
 }
 
 func (oce *exporter) createStandardMetricsExporter(
 	ctx context.Context,
-	set component.ExporterCreateSettings,
-	cfg config.Exporter,
+	opts []exporterhelper.Option,
 ) (component.MetricsExporter, error) {
-	return exporterhelper.NewMetricsExporter(ctx, set, cfg,
+	return exporterhelper.NewMetricsExporter(ctx, oce.settings, oce.config,
 		oce.pushMetrics,
-		exporterhelper.WithCapabilities(consumer.Capabilities{MutatesData: false}),
-		exporterhelper.WithTimeout(oce.config.TimeoutSettings),
-		exporterhelper.WithRetry(oce.config.RetrySettings),
-		exporterhelper.WithQueue(oce.config.QueueSettings),
-		exporterhelper.WithStart(oce.start),
-		exporterhelper.WithShutdown(oce.shutdown),
+		append(oce.settingsOpts(), opts...)...,
 	)
 }
 
@@ -149,33 +134,17 @@ func createLogsExporter(
 		return nil, err
 	}
 	if oce.config.Arrow != nil && oce.config.Arrow.Enabled {
-		return arrow.NewLogsExporter(
-			ctx,
-			set,
-			cfg,
-			oce.config.ExporterSettings,
-			oce.config.TimeoutSettings,
-			oce.config.RetrySettings,
-			oce.config.QueueSettings,
-			oce.config.GRPCClientSettings,
-			oce.createStandardLogsExporter,
-		)
+		return oce.newArrowLogsExporter(ctx)
 	}
-	return oce.createStandardLogsExporter(ctx, set, cfg)
+	return oce.createStandardLogsExporter(ctx, oce.startShutdownOpts())
 }
 
 func (oce *exporter) createStandardLogsExporter(
 	ctx context.Context,
-	set component.ExporterCreateSettings,
-	cfg config.Exporter,
+	opts []exporterhelper.Option,
 ) (component.LogsExporter, error) {
-	return exporterhelper.NewLogsExporter(ctx, set, cfg,
+	return exporterhelper.NewLogsExporter(ctx, oce.settings, oce.config,
 		oce.pushLogs,
-		exporterhelper.WithCapabilities(consumer.Capabilities{MutatesData: false}),
-		exporterhelper.WithTimeout(oce.config.TimeoutSettings),
-		exporterhelper.WithRetry(oce.config.RetrySettings),
-		exporterhelper.WithQueue(oce.config.QueueSettings),
-		exporterhelper.WithStart(oce.start),
-		exporterhelper.WithShutdown(oce.shutdown),
+		append(oce.settingsOpts(), opts...)...,
 	)
 }
