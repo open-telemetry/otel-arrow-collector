@@ -58,17 +58,12 @@ func createDefaultConfig() config.Exporter {
 	}
 }
 
-func (oce *exporter) settingsOpts() []exporterhelper.Option {
+func (oce *exporter) helperOptions() []exporterhelper.Option {
 	return []exporterhelper.Option{
 		exporterhelper.WithCapabilities(consumer.Capabilities{MutatesData: false}),
 		exporterhelper.WithTimeout(oce.config.TimeoutSettings),
 		exporterhelper.WithRetry(oce.config.RetrySettings),
 		exporterhelper.WithQueue(oce.config.QueueSettings),
-	}
-}
-
-func (oce *exporter) startShutdownOpts() []exporterhelper.Option {
-	return []exporterhelper.Option{
 		exporterhelper.WithStart(oce.start),
 		exporterhelper.WithShutdown(oce.shutdown),
 	}
@@ -83,19 +78,9 @@ func createTracesExporter(
 	if err != nil {
 		return nil, err
 	}
-	if oce.config.Arrow != nil && oce.config.Arrow.Enabled {
-		return oce.newArrowTracesExporter(ctx)
-	}
-	return oce.createStandardTracesExporter(ctx, oce.startShutdownOpts())
-}
-
-func (oce *exporter) createStandardTracesExporter(
-	ctx context.Context,
-	opts []exporterhelper.Option,
-) (component.TracesExporter, error) {
 	return exporterhelper.NewTracesExporter(ctx, oce.settings, oce.config,
 		oce.pushTraces,
-		append(oce.settingsOpts(), opts...)...,
+		oce.helperOptions()...,
 	)
 }
 
@@ -108,19 +93,9 @@ func createMetricsExporter(
 	if err != nil {
 		return nil, err
 	}
-	if oce.config.Arrow != nil && oce.config.Arrow.Enabled {
-		return oce.newArrowMetricsExporter(ctx)
-	}
-	return oce.createStandardMetricsExporter(ctx, oce.startShutdownOpts())
-}
-
-func (oce *exporter) createStandardMetricsExporter(
-	ctx context.Context,
-	opts []exporterhelper.Option,
-) (component.MetricsExporter, error) {
 	return exporterhelper.NewMetricsExporter(ctx, oce.settings, oce.config,
 		oce.pushMetrics,
-		append(oce.settingsOpts(), opts...)...,
+		oce.helperOptions()...,
 	)
 }
 
@@ -133,18 +108,8 @@ func createLogsExporter(
 	if err != nil {
 		return nil, err
 	}
-	if oce.config.Arrow != nil && oce.config.Arrow.Enabled {
-		return oce.newArrowLogsExporter(ctx)
-	}
-	return oce.createStandardLogsExporter(ctx, oce.startShutdownOpts())
-}
-
-func (oce *exporter) createStandardLogsExporter(
-	ctx context.Context,
-	opts []exporterhelper.Option,
-) (component.LogsExporter, error) {
 	return exporterhelper.NewLogsExporter(ctx, oce.settings, oce.config,
 		oce.pushLogs,
-		append(oce.settingsOpts(), opts...)...,
+		oce.helperOptions()...,
 	)
 }

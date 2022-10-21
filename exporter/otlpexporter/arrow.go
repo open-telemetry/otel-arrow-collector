@@ -3,12 +3,9 @@ package otlpexporter
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 
 	arrowpb "github.com/lquerel/otel-arrow-adapter/api/collector/arrow/v1"
 	batchEvent "github.com/lquerel/otel-arrow-adapter/pkg/otel/batch_event"
-	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
@@ -17,155 +14,176 @@ import (
 type arrowStream struct {
 	client arrowpb.EventsService_EventStreamClient
 
-	lock     sync.Mutex
+	// producer is exclusive to the holder of the stream
 	producer *batchEvent.Producer
-	waiters  map[string]chan error
+
+	// cancel cancels stream context
+	cancel context.CancelFunc
+
+	// lock protects waiters
+	lock    sync.Mutex
+	waiters map[string]chan error
 }
 
 type arrowExporter struct {
-	*exporter
+	client arrowpb.EventsServiceClient
 
-	client  arrowpb.EventsServiceClient
-	streams []*arrowStream // size = NumConsumers
-	rr      atomic.Int64   // round-robin for stream choice
+	// streams contains room for NumConsumers streams. streams
+	// will be closed to downgrade to standard OTLP.
+	streams chan *arrowStream
 
-	stop func() // cancels context used by consumers
-	wg   sync.WaitGroup
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 }
 
-type arrowTracesExporter struct {
-	*arrowExporter
-}
+func (e *exporter) startArrowExporter() (*arrowExporter, error) {
+	bgctx, bgcancel := context.WithCancel(context.Background())
+	bgctx = e.enhanceContext(bgctx)
 
-type arrowMetricsExporter struct {
-	*arrowExporter
-}
-
-type arrowLogsExporter struct {
-	*arrowExporter
-}
-
-func (e *exporter) newArrowExporter(_ context.Context) *arrowExporter {
-	return &arrowExporter{
-		exporter: e,
-	}
-}
-
-func (e *exporter) newArrowTracesExporter(ctx context.Context) (*arrowTracesExporter, error) {
-	return &arrowTracesExporter{
-		arrowExporter: e.newArrowExporter(ctx),
-	}, nil
-}
-
-func (e *exporter) newArrowMetricsExporter(ctx context.Context) (*arrowMetricsExporter, error) {
-	// exp, err := e.createStandardMetricsExporter(ctx, nil)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	return &arrowMetricsExporter{
-		arrowExporter: e.newArrowExporter(ctx),
-	}, nil
-}
-
-func (e *exporter) newArrowLogsExporter(ctx context.Context) (*arrowLogsExporter, error) {
-	// exp, err := e.createStandardLogsExporter(ctx, nil)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	return &arrowLogsExporter{
-		arrowExporter: e.newArrowExporter(ctx),
-	}, nil
-}
-
-func (ae *arrowExporter) Capabilities() consumer.Capabilities {
-	return consumer.Capabilities{
-		MutatesData: false,
-	}
-}
-
-func newArrowStream(sc arrowpb.EventsService_EventStreamClient) *arrowStream {
-	return &arrowStream{
-		client:   sc,
-		producer: batchEvent.NewProducer(),
-	}
-}
-
-func (ae *arrowExporter) Start(ctx context.Context, h component.Host) error {
-	err := ae.exporter.start(ctx, h)
-	if err != nil {
-		return err
+	ae := &arrowExporter{
+		client:  arrowpb.NewEventsServiceClient(e.clientConn),
+		streams: make(chan *arrowStream, e.config.NumConsumers),
+		cancel:  bgcancel,
 	}
 
-	bgctx, cancel := context.WithCancel(context.Background())
-	bgctx = ae.enhanceContext(bgctx)
+	var streams []*arrowStream
+	for i := 0; i < e.config.NumConsumers; i++ {
+		ctx, cancel := context.WithCancel(bgctx)
+		ctx = e.enhanceContext(ctx)
 
-	ae.client = arrowpb.NewEventsServiceClient(ae.clientConn)
-	ae.stop = cancel
-
-	for i := 0; i < ae.config.NumConsumers; i++ {
-		sc, err := ae.client.EventStream(bgctx, ae.callOptions...)
+		sc, err := ae.client.EventStream(ctx, e.callOptions...)
 		if err != nil {
-			return err
+			// TODO: if this is a "no such method" error, we
+			// should downgrade to Standard OTLP.
+			return nil, err
 		}
-		stream := newArrowStream(sc)
+		stream := &arrowStream{
+			client:   sc,
+			producer: batchEvent.NewProducer(),
+			waiters:  map[string]chan error{},
+			cancel:   cancel,
+		}
+		streams = append(streams, stream)
 
-		go stream.run(ctx, ae)
+		go ae.runStream(ctx, stream)
 
-		ae.streams = append(ae.streams, stream)
 		ae.wg.Add(1)
+		ae.streams <- stream
 	}
-
-	return nil
+	return ae, nil
 }
 
-func (stream *arrowStream) run(ctx context.Context, ae *arrowExporter) {
-	defer ae.wg.Done()
-
-}
-
-func (ae *arrowExporter) Shutdown(ctx context.Context) error {
-	ae.stop()
-	ae.wg.Wait()
-	return ae.exporter.shutdown(ctx)
-}
-
-func (ae *arrowTracesExporter) ConsumeTraces(ctx context.Context, td ptrace.Traces) error {
-	return ae.consumeAndWait(ctx, td)
-}
-
-func (ae *arrowMetricsExporter) ConsumeMetrics(ctx context.Context, md pmetric.Metrics) error {
-	return ae.consumeAndWait(ctx, md)
-}
-
-func (ae *arrowLogsExporter) ConsumeLogs(ctx context.Context, ld plog.Logs) error {
-	return ae.consumeAndWait(ctx, ld)
+func (e *exporter) getArrowStream() *arrowStream {
+	if e.arrow == nil {
+		return nil
+	}
+	return e.arrow.pickStream()
 }
 
 func (ae *arrowExporter) pickStream() *arrowStream {
-	return ae.streams[ae.rr.Add(1)%int64(ae.config.NumConsumers)]
+	// when ae.streams is closed this returns nil
+	return <-ae.streams
 }
 
-func (ae *arrowExporter) consumeAndWait(ctx context.Context, records interface{}) error {
-	cleanup, ch, err := ae.consume(ctx, records)
+func (ae *arrowExporter) shutdown(ctx context.Context) error {
+	ae.cancel()
+	ae.wg.Wait()
+	return nil
+}
+
+func (ae *arrowExporter) runStream(ctx context.Context, stream *arrowStream) {
+	defer stream.cancel()
+	defer ae.wg.Done()
+
+	for {
+		resp, err := stream.client.Recv()
+		// If ...
+		if err != nil {
+
+			// probably just log this
+			return
+		}
+
+		ae.processBatchStatus(stream, resp.Statuses)
+	}
+}
+
+func (ae *arrowExporter) processBatchStatus(stream *arrowStream, statuses []*arrowpb.StatusMessage) {
+	ae.lock.Lock()
+	defer ae.lock.Unlock()
+
+	for _, status := range statuses {
+		ch, ok := ae.waiters[status.BatchId]
+		if ok {
+			ch <- nil
+		}
+	}
+}
+
+func (ae *arrowExporter) returnStream(stream *arrowStream) {
+	ae.streams <- stream
+}
+
+func (ae *arrowExporter) encodeAndSend(ctx context.Context, stream *arrowStream, records interface{}) (string, chan error, error) {
+	defer ae.returnStream(stream)
+
+	batch, err := stream.encode(records)
+	if err != nil {
+		return "", nil, err
+	}
+	ch, err := stream.send(ctx, batch)
+	if err != nil {
+		return "", nil, err
+	}
+	return batch.BatchId, ch, nil
+}
+
+func (ae *arrowExporter) sendAndWait(ctx context.Context, stream *arrowStream, records interface{}) error {
+	batchID, ch, err := ae.encodeAndSend(ctx, stream, records)
 	if err != nil {
 		return err
 	}
-	defer cleanup()
+
+	defer func() {
+		close(ch)
+
+		stream.lock.Lock()
+		defer stream.lock.Unlock()
+
+		delete(stream.waiters, batchID)
+	}()
+
 	select {
 	case <-ctx.Done():
+		// The caller's pipeline context timed out, but this stream is OK.
 		return ctx.Err()
 	case err := <-ch:
 		return err
 	}
 }
 
-func (ae *arrowExporter) consume(ctx context.Context, records interface{}) (func(), chan error, error) {
-	stream := ae.pickStream()
+func (stream *arrowStream) send(_ context.Context, batch *arrowpb.BatchEvent) (chan error, error) {
+	// TODO: incoming pipeline context is not used, the Send()
+	// will not be canceled because of the incoming
+	// context.
+
+	if err := stream.client.Send(batch); err != nil {
+		return nil, processGRPCError(err)
+	}
+
+	ch := make(chan error)
+
 	stream.lock.Lock()
 	defer stream.lock.Unlock()
 
+	stream.waiters[batch.BatchId] = ch
+
+	return ch, nil
+}
+
+func (stream *arrowStream) encode(records interface{}) (*arrowpb.BatchEvent, error) {
 	// Note: Discussed w/ LQ 10/20/22 this producer method will
-	// change to produce one batch event per input, i.e., Send()
+	// change to produce one batch event per input, i.e., one Send()
 	// call each.
 	var batches []*arrowpb.BatchEvent
 	var err error
@@ -178,25 +196,10 @@ func (ae *arrowExporter) consume(ctx context.Context, records interface{}) (func
 		// TODO
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	// TODO: DO NOT DROP DATA batches[1..N]
+
+	// TODO: DO NOT DROP DATA batches[1..N], see note above.
 	batch := batches[0]
-
-	ch := make(chan error)
-	stream.waiters[batch.BatchId] = ch
-
-	if err := stream.client.Send(batch); err != nil {
-		return nil, nil, err
-	}
-
-	cleanup := func() {
-		close(ch)
-
-		stream.lock.Lock()
-		defer stream.lock.Unlock()
-
-		delete(stream.waiters, batch.BatchId)
-	}
-	return cleanup, ch, nil
+	return batch, nil
 }

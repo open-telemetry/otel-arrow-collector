@@ -55,6 +55,9 @@ type exporter struct {
 
 	// Default user-agent header.
 	userAgent string
+
+	// OTLP+Arrow optional state
+	arrow *arrowExporter
 }
 
 // Crete new exporter and start it. The exporter will begin connecting but
@@ -99,29 +102,51 @@ func (e *exporter) start(ctx context.Context, host component.Host) error {
 		grpc.WaitForReady(e.config.GRPCClientSettings.WaitForReady),
 	}
 
+	if e.config.Arrow != nil && e.config.Arrow.Enabled {
+		e.arrow, err = e.startArrowExporter()
+		return err
+	}
+
 	return nil
 }
 
-func (e *exporter) shutdown(context.Context) error {
-	return e.clientConn.Close()
+func (e *exporter) shutdown(ctx context.Context) error {
+	err := e.clientConn.Close()
+
+	if e.arrow != nil {
+		err2 := e.arrow.shutdown(ctx)
+		if err2 != nil && err == nil {
+			err = err2
+		}
+	}
+	return err
 }
 
 func (e *exporter) pushTraces(ctx context.Context, td ptrace.Traces) error {
+	if stream := e.getArrowStream(); stream != nil {
+		return e.arrow.sendAndWait(ctx, stream, td)
+	}
 	req := ptraceotlp.NewRequestFromTraces(td)
 	_, err := e.traceExporter.Export(e.enhanceContext(ctx), req, e.callOptions...)
-	return processError(err)
+	return processGRPCError(err)
 }
 
 func (e *exporter) pushMetrics(ctx context.Context, md pmetric.Metrics) error {
+	if stream := e.getArrowStream(); stream != nil {
+		return e.arrow.sendAndWait(ctx, stream, md)
+	}
 	req := pmetricotlp.NewRequestFromMetrics(md)
 	_, err := e.metricExporter.Export(e.enhanceContext(ctx), req, e.callOptions...)
-	return processError(err)
+	return processGRPCError(err)
 }
 
 func (e *exporter) pushLogs(ctx context.Context, ld plog.Logs) error {
+	if stream := e.getArrowStream(); stream != nil {
+		return e.arrow.sendAndWait(ctx, stream, ld)
+	}
 	req := plogotlp.NewRequestFromLogs(ld)
 	_, err := e.logExporter.Export(e.enhanceContext(ctx), req, e.callOptions...)
-	return processError(err)
+	return processGRPCError(err)
 }
 
 func (e *exporter) enhanceContext(ctx context.Context) context.Context {
@@ -131,7 +156,7 @@ func (e *exporter) enhanceContext(ctx context.Context) context.Context {
 	return ctx
 }
 
-func processError(err error) error {
+func processGRPCError(err error) error {
 	if err == nil {
 		// Request is successful, we are done.
 		return nil
