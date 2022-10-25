@@ -103,8 +103,7 @@ func (e *exporter) start(ctx context.Context, host component.Host) error {
 	}
 
 	if e.config.Arrow != nil && e.config.Arrow.Enabled {
-		e.arrow, err = e.startArrowExporter()
-		return err
+		e.arrow = e.startArrowExporter()
 	}
 
 	return nil

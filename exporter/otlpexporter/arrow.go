@@ -9,10 +9,32 @@ import (
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
+	"go.uber.org/zap"
 )
+
+type arrowExporter struct {
+	// exporter allows this to refer to all the settings
+	exporter *exporter
+	client   arrowpb.EventsServiceClient
+
+	// streams contains room for NumConsumers streams.
+	streams chan *arrowStream
+
+	returning chan *arrowStream
+
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+}
+
+type writeItem struct {
+	records interface{}
+	errCh   chan error
+}
 
 type arrowStream struct {
 	client arrowpb.EventsService_EventStreamClient
+
+	writer chan writeItem
 
 	// producer is exclusive to the holder of the stream
 	producer *batchEvent.Producer
@@ -25,82 +47,143 @@ type arrowStream struct {
 	waiters map[string]chan error
 }
 
-type arrowExporter struct {
-	client arrowpb.EventsServiceClient
-
-	// streams contains room for NumConsumers streams. streams
-	// will be closed to downgrade to standard OTLP.
-	streams chan *arrowStream
-
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
-}
-
-func (e *exporter) startArrowExporter() (*arrowExporter, error) {
+func (e *exporter) startArrowExporter() *arrowExporter {
 	bgctx, bgcancel := context.WithCancel(context.Background())
 	bgctx = e.enhanceContext(bgctx)
 
 	ae := &arrowExporter{
-		client:  arrowpb.NewEventsServiceClient(e.clientConn),
-		streams: make(chan *arrowStream, e.config.NumConsumers),
-		cancel:  bgcancel,
+		exporter:  e,
+		client:    arrowpb.NewEventsServiceClient(e.clientConn),
+		streams:   make(chan *arrowStream, e.config.NumConsumers),
+		returning: make(chan *arrowStream, e.config.NumConsumers),
+		cancel:    bgcancel,
+	}
+	ae.wg.Add(1)
+	go ae.runStreamController(bgctx)
+
+	return ae
+}
+
+func (ae *arrowExporter) runStreamController(bgctx context.Context) {
+	defer ae.wg.Done()
+
+	for i := 0; i < cap(ae.streams); i++ {
+		ae.wg.Add(1)
+		go ae.startArrowStream(bgctx)
 	}
 
-	var streams []*arrowStream
-	for i := 0; i < e.config.NumConsumers; i++ {
-		ctx, cancel := context.WithCancel(bgctx)
-		ctx = e.enhanceContext(ctx)
+	for {
+		// @@@
+		select {
+		case stream := <-ae.returning:
 
-		sc, err := ae.client.EventStream(ctx, e.callOptions...)
-		if err != nil {
-			// TODO: if this is a "no such method" error, we
-			// should downgrade to Standard OTLP.
-			return nil, err
-		}
-		stream := &arrowStream{
-			client:   sc,
-			producer: batchEvent.NewProducer(),
-			waiters:  map[string]chan error{},
-			cancel:   cancel,
-		}
-		streams = append(streams, stream)
+			if stream.client == nil {
 
-		go ae.runStream(ctx, stream)
+			}
+
+		case <-bgctx.Done():
+			return
+		}
+	}
+}
+
+func (ae *arrowExporter) startArrowStream(bgctx context.Context) {
+	defer ae.wg.Done()
+
+	ctx, cancel := context.WithCancel(bgctx)
+
+	stream := &arrowStream{
+		writer:   make(chan writeItem, 1),
+		producer: batchEvent.NewProducer(),
+		waiters:  map[string]chan error{},
+		cancel:   cancel,
+	}
+
+	if sc, err := ae.client.EventStream(ctx, ae.exporter.callOptions...); err != nil {
+		// TODO: if this is a "no such method" error,
+		// downgrade to Standard OTLP w/ close(ae.streams).
+		// For now always downgrade:
+		ae.streams <- nil
+		ae.exporter.settings.Logger.Error("cannnot start event stream", zap.Error(err))
+	} else {
+		// Setting .client != nil indicates that the endpoint
+		stream.client = sc
+		ae.streams <- stream
 
 		ae.wg.Add(1)
-		ae.streams <- stream
+
+		// TODO: somewhere here, wait for reader/writer then return to all?
+		go ae.writeStream(ctx, stream)
+
+		ae.readStream(ctx, stream)
 	}
-	return ae, nil
+
+	ae.returning <- stream
 }
 
 func (e *exporter) getArrowStream() *arrowStream {
 	if e.arrow == nil {
 		return nil
 	}
-	return e.arrow.pickStream()
-}
-
-func (ae *arrowExporter) pickStream() *arrowStream {
-	// when ae.streams is closed this returns nil
-	return <-ae.streams
+	for {
+		stream := <-ae.streams
+		if stream == nil {
+			return nil
+		}
+		return stream
+	}
 }
 
 func (ae *arrowExporter) shutdown(ctx context.Context) error {
 	ae.cancel()
 	ae.wg.Wait()
+	// @@@ hmm?
 	return nil
 }
 
-func (ae *arrowExporter) runStream(ctx context.Context, stream *arrowStream) {
+func (stream *arrowStream) setBatchChannel(batchID string, errCh chan error) {
+	stream.lock.Lock()
+	defer stream.lock.Unlock()
+
+	stream.waiters[batchID] = errCh
+}
+
+func (ae *arrowExporter) writeStream(ctx context.Context, stream *arrowStream) {
 	defer stream.cancel()
-	defer ae.wg.Done()
+
+	for {
+		wri := <-stream.writer
+
+		batch, err := stream.encode(wri.records)
+		if err != nil {
+			wri.errCh <- err
+			ae.exporter.settings.Logger.Error("arrow encode", zap.Error(err))
+			// TODO: Should we continue--what caused the
+			// encode failure?  Returning here breaks the
+			// stream.  If individual encode errors are
+			// tolerated, do not return.
+			return
+		}
+
+		stream.setBatchChannel(batch.BatchId, wri.errCh)
+
+		if err := stream.client.Send(batch); err != nil {
+			ae.exporter.settings.Logger.Error("arrow send", zap.Error(err))
+			return
+		}
+
+		ae.streams <- stream
+	}
+}
+
+func (ae *arrowExporter) readStream(ctx context.Context, stream *arrowStream) {
+	defer stream.cancel()
 
 	for {
 		resp, err := stream.client.Recv()
-		// If ...
-		if err != nil {
 
-			// probably just log this
+		if err != nil {
+			ae.exporter.settings.Logger.Error("arrow recv", zap.Error(err))
 			return
 		}
 
@@ -109,76 +192,35 @@ func (ae *arrowExporter) runStream(ctx context.Context, stream *arrowStream) {
 }
 
 func (ae *arrowExporter) processBatchStatus(stream *arrowStream, statuses []*arrowpb.StatusMessage) {
-	ae.lock.Lock()
-	defer ae.lock.Unlock()
-
-	for _, status := range statuses {
-		ch, ok := ae.waiters[status.BatchId]
-		if ok {
-			ch <- nil
-		}
-	}
-}
-
-func (ae *arrowExporter) returnStream(stream *arrowStream) {
-	ae.streams <- stream
-}
-
-func (ae *arrowExporter) encodeAndSend(ctx context.Context, stream *arrowStream, records interface{}) (string, chan error, error) {
-	defer ae.returnStream(stream)
-
-	batch, err := stream.encode(records)
-	if err != nil {
-		return "", nil, err
-	}
-	ch, err := stream.send(ctx, batch)
-	if err != nil {
-		return "", nil, err
-	}
-	return batch.BatchId, ch, nil
-}
-
-func (ae *arrowExporter) sendAndWait(ctx context.Context, stream *arrowStream, records interface{}) error {
-	batchID, ch, err := ae.encodeAndSend(ctx, stream, records)
-	if err != nil {
-		return err
-	}
-
-	defer func() {
-		close(ch)
-
-		stream.lock.Lock()
-		defer stream.lock.Unlock()
-
-		delete(stream.waiters, batchID)
-	}()
-
-	select {
-	case <-ctx.Done():
-		// The caller's pipeline context timed out, but this stream is OK.
-		return ctx.Err()
-	case err := <-ch:
-		return err
-	}
-}
-
-func (stream *arrowStream) send(_ context.Context, batch *arrowpb.BatchEvent) (chan error, error) {
-	// TODO: incoming pipeline context is not used, the Send()
-	// will not be canceled because of the incoming
-	// context.
-
-	if err := stream.client.Send(batch); err != nil {
-		return nil, processGRPCError(err)
-	}
-
-	ch := make(chan error)
-
 	stream.lock.Lock()
 	defer stream.lock.Unlock()
 
-	stream.waiters[batch.BatchId] = ch
+	for _, status := range statuses {
+		ch, ok := stream.waiters[status.BatchId]
+		if !ok {
 
-	return ch, nil
+			continue
+		}
+
+		ch <- nil
+		delete(stream.waiters, status.BatchId)
+	}
+}
+
+func (ae *arrowExporter) sendAndWait(ctx context.Context, stream *arrowStream, records interface{}) error {
+	errCh := make(chan error, 1)
+	stream.writer <- writeItem{
+		records: records,
+		errCh:   errCh,
+	}
+
+	// Note this ensures the caller's timeout is respected.
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-errCh:
+		return err
+	}
 }
 
 func (stream *arrowStream) encode(records interface{}) (*arrowpb.BatchEvent, error) {
