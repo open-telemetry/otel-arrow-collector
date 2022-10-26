@@ -29,6 +29,9 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// High-level TODOs:
+// TODO: Use the MAX_CONNECTION_AGE and MAX_CONNECTION_AGE_GRACE settings.
+
 // arrowExporter is 1:1 with exporter, isolates arrow-specific
 // functionality.
 type arrowExporter struct {
