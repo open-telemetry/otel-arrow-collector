@@ -331,18 +331,21 @@ func (ae *arrowExporter) sendAndWait(ctx context.Context, stream *arrowStream, r
 
 // encode produces the next batch of Arrow records.
 func (stream *arrowStream) encode(records interface{}) (*arrowpb.BatchEvent, error) {
-	// Note: Discussed w/ LQ 10/20/22 this producer method will
-	// change to produce one batch event per input, i.e., one Send()
-	// call each.
+	// Note!! This is a placeholder.  After this PR merges the
+	// code base will be upgraded to the latest version of
+	// github.com/f5/otel-arrow-adapter, which returns one
+	// BatchEvent per pdata Logs/Metrics/Traces.  The TODO below
+	// will be addressed, i.e., we will not drop all but one
+	// batch.
 	var batches []*arrowpb.BatchEvent
 	var err error
 	switch data := records.(type) {
 	case ptrace.Traces:
 		batches, err = stream.producer.BatchEventsFrom(data)
 	case plog.Logs:
-		// TODO
+		// TODO: WIP in https://github.com/f5/otel-arrow-adapter/pull/13
 	case pmetric.Metrics:
-		// TODO
+		// TODO: This will follow.
 	}
 	if err != nil {
 		return nil, err
