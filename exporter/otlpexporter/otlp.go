@@ -122,7 +122,9 @@ func (e *exporter) shutdown(ctx context.Context) error {
 }
 
 func (e *exporter) pushTraces(ctx context.Context, td ptrace.Traces) error {
-	if stream := e.getArrowStream(); stream != nil {
+	if stream, err := e.getArrowStream(ctx); err != nil {
+		return err
+	} else if stream != nil {
 		return e.arrow.sendAndWait(ctx, stream, td)
 	}
 	req := ptraceotlp.NewRequestFromTraces(td)
@@ -131,7 +133,9 @@ func (e *exporter) pushTraces(ctx context.Context, td ptrace.Traces) error {
 }
 
 func (e *exporter) pushMetrics(ctx context.Context, md pmetric.Metrics) error {
-	if stream := e.getArrowStream(); stream != nil {
+	if stream, err := e.getArrowStream(ctx); err != nil {
+		return err
+	} else if stream != nil {
 		return e.arrow.sendAndWait(ctx, stream, md)
 	}
 	req := pmetricotlp.NewRequestFromMetrics(md)
@@ -140,7 +144,9 @@ func (e *exporter) pushMetrics(ctx context.Context, md pmetric.Metrics) error {
 }
 
 func (e *exporter) pushLogs(ctx context.Context, ld plog.Logs) error {
-	if stream := e.getArrowStream(); stream != nil {
+	if stream, err := e.getArrowStream(ctx); err != nil {
+		return err
+	} else if stream != nil {
 		return e.arrow.sendAndWait(ctx, stream, ld)
 	}
 	req := plogotlp.NewRequestFromLogs(ld)

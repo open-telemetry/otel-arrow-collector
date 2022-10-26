@@ -6,6 +6,7 @@ import (
 
 	arrowpb "github.com/lquerel/otel-arrow-adapter/api/collector/arrow/v1"
 	batchEvent "github.com/lquerel/otel-arrow-adapter/pkg/otel/batch_event"
+	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
@@ -24,10 +25,8 @@ type arrowExporter struct {
 	// client is created from the exporter's gRPC ClientConn.
 	client arrowpb.EventsServiceClient
 
-	// streams contains room for NumConsumers streams; senders
-	// will take the next available stream.  When an OTLP+Arrow
-	// stream downgrades to standard OTLP nil values are used.
-	streams chan *arrowStream
+	// ready prioritizes streams that are ready to send
+	ready streamPrioritizer
 
 	// returning is used to pass broken, gracefully-terminated,
 	// and otherwise to the stream controller.
@@ -40,6 +39,14 @@ type arrowExporter struct {
 	// wg counts one per active goroutine belonging to all strings
 	// of this exporter.
 	wg sync.WaitGroup
+}
+
+// streamPrioritizer is a placeholder for a configurable mechanism
+// that selects the next strea, to write.
+type streamPrioritizer struct {
+	// channel will be closed to downgrade to standard OTLP,
+	// otherwise it returns the first-available.
+	channel chan *arrowStream
 }
 
 // writeItem is passed from the sender (a pipeline consumer) to the
@@ -81,7 +88,7 @@ func (e *exporter) startArrowExporter() *arrowExporter {
 	ae := &arrowExporter{
 		exporter:  e,
 		client:    arrowpb.NewEventsServiceClient(e.clientConn),
-		streams:   make(chan *arrowStream, e.config.Arrow.NumStreams),
+		ready:     e.newPrioritizer(),
 		returning: make(chan *arrowStream, e.config.Arrow.NumStreams),
 		cancel:    bgcancel,
 	}
@@ -99,8 +106,10 @@ func (ae *arrowExporter) runStreamController(bgctx context.Context) {
 	defer ae.cancel()
 	defer ae.wg.Done()
 
+	running := ae.exporter.config.Arrow.NumStreams
+
 	// Start the initial number of streams
-	for i := 0; i < ae.exporter.config.Arrow.NumStreams; i++ {
+	for i := 0; i < running; i++ {
 		ae.wg.Add(1)
 		go ae.runArrowStream(bgctx)
 	}
@@ -112,11 +121,16 @@ func (ae *arrowExporter) runStreamController(bgctx context.Context) {
 				// The stream closed or broken.  Restart it.
 				ae.wg.Add(1)
 				go ae.runArrowStream(bgctx)
-			} else {
-				// Otherwise, the stream never got started.  It was
-				// downgraded and senders will use the standard OTLP
-				// path as this exporter is alive--a nil *arrowStream
-				// is being used.
+				continue
+			}
+			// Otherwise, the stream never got started.  It was
+			// downgraded and senders will use the standard OTLP path.
+			running--
+
+			// None of the streams were able to connect to
+			// an Arrow endpoint.
+			if running == 0 {
+				ae.ready.downgrade()
 			}
 
 		case <-bgctx.Done():
@@ -131,11 +145,7 @@ func (ae *arrowExporter) runStreamController(bgctx context.Context) {
 // to call writeStream() and performs readStream() itself.  When the stream shuts
 // down this call synchronously waits for and unblocks the consumers.
 func (ae *arrowExporter) runArrowStream(bgctx context.Context) {
-	defer ae.wg.Done()
-
 	ctx, cancel := context.WithCancel(bgctx)
-
-	defer cancel()
 
 	stream := &arrowStream{
 		toWrite:  make(chan writeItem, 1),
@@ -144,52 +154,61 @@ func (ae *arrowExporter) runArrowStream(bgctx context.Context) {
 		cancel:   cancel,
 	}
 
-	if sc, err := ae.client.EventStream(ctx, ae.exporter.callOptions...); err != nil {
-		// TODO: only when this is a "no such method" error, downgrade to
-		// standard OTLP by placing a nil stream into the streams channel.
-		// For now always downgrade:
-		ae.streams <- nil
+	defer func() {
+		ae.wg.Done()
+		cancel()
+		ae.returning <- stream
+	}()
+
+	sc, err := ae.client.EventStream(ctx, ae.exporter.callOptions...)
+	if err != nil {
+		// TODO: only when this is a permanent (e.g., "no such
+		// method") error, downgrade to standard OTLP.
+		// Returning with stream.client == nil signals the
+		// lack of an Arrow stream endpoint.  When all the
+		// streams return with .client == nil, the ready
+		// channel will be closed.
 		ae.exporter.settings.Logger.Error("cannnot start event stream", zap.Error(err))
-	} else {
-		// Setting .client != nil indicates that the endpoint was valid,
-		// streaming may start.  When this stream finishes, it will be
-		// restarted.
-		stream.client = sc
+		return
+	}
+	// Setting .client != nil indicates that the endpoint was valid,
+	// streaming may start.  When this stream finishes, it will be
+	// restarted.
+	stream.client = sc
 
-		var ww sync.WaitGroup
+	var ww sync.WaitGroup
 
-		ww.Add(1)
-		ae.wg.Add(1)
-		go ae.writeStream(ctx, stream, &ww)
+	ww.Add(1)
+	ae.wg.Add(1)
+	go ae.writeStream(ctx, stream, &ww)
 
-		ae.readStream(ctx, stream)
-
-		// Wait for the writer to ensure that all waiters are released
-		// below.
-		ww.Wait()
-
-		// The reader and writer have both finished; respond to any
-		// outstanding waiters.
-		for _, ch := range stream.waiters {
-			ch <- status.Error(codes.Aborted, "stream is restarting")
-		}
+	if err := ae.readStream(ctx, stream); err != nil {
+		// TODO: should this log even an io.EOF error?
+		ae.exporter.settings.Logger.Error("arrow recv", zap.Error(err))
 	}
 
-	// The stream is finished, return to the stream controller.
-	ae.returning <- stream
+	// Wait for the writer to ensure that all waiters are known.
+	ww.Wait()
+
+	// The reader and writer have both finished; respond to any
+	// outstanding waiters.
+	for _, ch := range stream.waiters {
+		ch <- status.Error(codes.Aborted, "stream is restarting")
+	}
 }
 
 // getArrowStream returns the first-available stream.  This returns nil
 // when the consumer should fall back to standard OTLP.
-func (e *exporter) getArrowStream() *arrowStream {
+func (e *exporter) getArrowStream(ctx context.Context) (*arrowStream, error) {
 	if e.arrow == nil {
-		return nil
+		return nil, nil
 	}
-	stream := <-e.arrow.streams
-	if stream == nil {
-		return nil
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case stream := <-e.arrow.ready.readyChannel():
+		return stream, nil
 	}
-	return stream
 }
 
 // shutdown returns when all Arrow-associated goroutines have returned.
@@ -219,7 +238,7 @@ writeLoop:
 	for {
 		// Note: this can't block b/c stream has capacity &
 		// individual streams shut down synchronously.
-		ae.streams <- stream
+		ae.ready.setReady(stream)
 
 		// this can block, and if the context is canceled we
 		// wait for the reader to find this stream.
@@ -227,7 +246,7 @@ writeLoop:
 		select {
 		case wri = <-stream.toWrite:
 		case <-ctx.Done():
-			// Because we did not <-stream.toWrite there is a potential
+			// Because we did not <-stream.toWrite, there is a potential
 			// sender race happening, which is handled below.
 			break writeLoop
 		}
@@ -237,11 +256,11 @@ writeLoop:
 
 		batch, err := stream.encode(wri.records)
 		if err != nil {
-			// This is some kind of internal error, and the write item
-			// has not been put into the waiters struct yet. The stream
-			// will be canceled immediately.  TODO how do we know if
-			// this should be a permanent error?
-			wri.errCh <- err
+			// TODO: Is this not permanent?  Another
+			// sequence of data might not produce it.
+			//
+			// This is some kind of internal error.
+			wri.errCh <- consumererror.NewPermanent(err)
 			ae.exporter.settings.Logger.Error("arrow encode", zap.Error(err))
 			return
 		}
@@ -255,34 +274,19 @@ writeLoop:
 		}
 	}
 
-	// For the break statement above, in case a sender is trying to use the stream.
-	stream.cancel()
-	for i := 0; i < ae.exporter.config.Arrow.NumStreams; i++ {
-		var alternate *arrowStream
-		select {
-		case alternate = <-ae.streams:
-			if alternate == stream {
-				return
-			}
-			ae.streams <- alternate
-		case wri := <-stream.toWrite:
-			// a consumer got us first
-			wri.errCh <- status.Error(codes.Aborted, "stream is restarting")
-		}
-	}
+	// Remove this from the ready channel.
+	ae.ready.removeReady(stream)
 }
 
 // readStream repeatedly reads a batch status and releases the consumers waiting for
 // a response.
-func (ae *arrowExporter) readStream(ctx context.Context, stream *arrowStream) {
+func (ae *arrowExporter) readStream(ctx context.Context, stream *arrowStream) error {
 	defer stream.cancel()
 
 	for {
 		resp, err := stream.client.Recv()
-
 		if err != nil {
-			ae.exporter.settings.Logger.Error("arrow recv", zap.Error(err))
-			break
+			return err
 		}
 
 		ae.processBatchStatus(stream, resp.Statuses)
@@ -347,4 +351,51 @@ func (stream *arrowStream) encode(records interface{}) (*arrowpb.BatchEvent, err
 	// TODO: DO NOT DROP DATA batches[1..N], see note above.
 	batch := batches[0]
 	return batch, nil
+}
+
+// newPrioritizer constructs a channel-based first-available prioritizer.
+func (e *exporter) newPrioritizer() streamPrioritizer {
+	return streamPrioritizer{
+		make(chan *arrowStream, e.config.Arrow.NumStreams),
+	}
+}
+
+// downgrade indicates that streams are never going to be ready.  Note
+// the caller is required to ensure that setReady() and removeReady()
+// cannot be called concurrently; this is done by waiting for
+// arrowStream.writeStream() calls to return before downgrading.
+func (sp *streamPrioritizer) downgrade() {
+	close(sp.channel)
+}
+
+// readyChannel returns channel to select a ready stream.  The caller
+// is expected to select on this and ctx.Done() simultaneously.  If
+// the exporter is downgraded, the channel will be closed.
+func (sp *streamPrioritizer) readyChannel() chan *arrowStream {
+	return sp.channel
+}
+
+// setReady marks this stream ready for use.
+func (sp *streamPrioritizer) setReady(stream *arrowStream) {
+	// Note: downgrade() can't be called concurrently.
+	sp.channel <- stream
+}
+
+// removeReady removes this stream from the ready set, used in cases
+// where the stream has broken unexpectedly.
+func (sp *streamPrioritizer) removeReady(stream *arrowStream) {
+	// Note: downgrade() can't be called concurrently.
+	for {
+		// Searching for this stream to get it out of the ready queue.
+		select {
+		case alternate := <-sp.channel:
+			if alternate == stream {
+				return
+			}
+			sp.channel <- alternate
+		case wri := <-stream.toWrite:
+			// A consumer got us first.
+			wri.errCh <- status.Error(codes.Aborted, "stream is restarting")
+		}
+	}
 }
