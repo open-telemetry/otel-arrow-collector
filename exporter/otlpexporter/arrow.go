@@ -30,7 +30,7 @@ type arrowExporter struct {
 	streams chan *arrowStream
 
 	// returning is used to pass broken, gracefully-terminated,
-	// and otherwise to the stream manager.
+	// and otherwise to the stream controller.
 	returning chan *arrowStream
 
 	// cancel cancels the background context of this
@@ -55,7 +55,9 @@ type writeItem struct {
 type arrowStream struct {
 	client arrowpb.EventsService_EventStreamClient
 
-	writer chan writeItem
+	// toWrite is passes a batch from the sender to the stream writer, which
+	// includes a dedicated channel for the response.
+	toWrite chan writeItem
 
 	// producer is exclusive to the holder of the stream
 	producer *batchEvent.Producer
@@ -71,7 +73,7 @@ type arrowStream struct {
 }
 
 // startArrowExporter creates the background context used by all streams and
-// starts a stream manager, which initializes the initial set of streams.
+// starts a stream controller, which initializes the initial set of streams.
 func (e *exporter) startArrowExporter() *arrowExporter {
 	bgctx, bgcancel := context.WithCancel(context.Background())
 	bgctx = e.enhanceContext(bgctx)
@@ -100,21 +102,21 @@ func (ae *arrowExporter) runStreamController(bgctx context.Context) {
 	// Start the initial number of streams
 	for i := 0; i < ae.exporter.config.Arrow.NumStreams; i++ {
 		ae.wg.Add(1)
-		go ae.startArrowStream(bgctx)
+		go ae.runArrowStream(bgctx)
 	}
 
 	for {
 		select {
 		case stream := <-ae.returning:
 			if stream.client != nil {
-				// The stream closed or broken.
-				// Restart it.
+				// The stream closed or broken.  Restart it.
 				ae.wg.Add(1)
-				go ae.startArrowStream(bgctx)
+				go ae.runArrowStream(bgctx)
 			} else {
 				// Otherwise, the stream never got started.  It was
-				// downgraded, senders will continue to do this as
-				// long as this exporter is alive, do nothing.
+				// downgraded and senders will use the standard OTLP
+				// path as this exporter is alive--a nil *arrowStream
+				// is being used.
 			}
 
 		case <-bgctx.Done():
@@ -124,17 +126,19 @@ func (ae *arrowExporter) runStreamController(bgctx context.Context) {
 	}
 }
 
-// startArrowStream begins one gRPC stream using a child of the background context.
+// runArrowStream begins one gRPC stream using a child of the background context.
 // If the stream connection is successful, this goroutine starts another goroutine
 // to call writeStream() and performs readStream() itself.  When the stream shuts
-// down this call synchronously waits.
-func (ae *arrowExporter) startArrowStream(bgctx context.Context) {
+// down this call synchronously waits for and unblocks the consumers.
+func (ae *arrowExporter) runArrowStream(bgctx context.Context) {
 	defer ae.wg.Done()
 
 	ctx, cancel := context.WithCancel(bgctx)
 
+	defer cancel()
+
 	stream := &arrowStream{
-		writer:   make(chan writeItem, 1),
+		toWrite:  make(chan writeItem, 1),
 		producer: batchEvent.NewProducer(),
 		waiters:  map[string]chan error{},
 		cancel:   cancel,
@@ -171,6 +175,7 @@ func (ae *arrowExporter) startArrowStream(bgctx context.Context) {
 		}
 	}
 
+	// The stream is finished, return to the stream controller.
 	ae.returning <- stream
 }
 
@@ -210,6 +215,7 @@ func (ae *arrowExporter) writeStream(ctx context.Context, stream *arrowStream, w
 	defer ww.Done()
 	defer stream.cancel()
 
+writeLoop:
 	for {
 		// Note: this can't block b/c stream has capacity &
 		// individual streams shut down synchronously.
@@ -219,14 +225,15 @@ func (ae *arrowExporter) writeStream(ctx context.Context, stream *arrowStream, w
 		// wait for the reader to find this stream.
 		var wri writeItem
 		select {
-		case wri = <-stream.writer:
+		case wri = <-stream.toWrite:
 		case <-ctx.Done():
+			// Because we did not <-stream.toWrite there is a potential
+			// sender race happening, which is handled below.
+			break writeLoop
 		}
-		if wri.records == nil {
-			// context is done, break to get ourselves out
-			// of the streams queue below.
-			break
-		}
+		// Note: For the two return statements below there is no potential
+		// sender race because the stream is not available, as indicated by
+		// the successful <-stream.toWrite.
 
 		batch, err := stream.encode(wri.records)
 		if err != nil {
@@ -242,14 +249,13 @@ func (ae *arrowExporter) writeStream(ctx context.Context, stream *arrowStream, w
 		stream.setBatchChannel(batch.BatchId, wri.errCh)
 
 		if err := stream.client.Send(batch); err != nil {
-			// The error is sent to errCh during cleanup for this stream.
+			// The error will be sent to errCh during cleanup for this stream.
 			ae.exporter.settings.Logger.Error("arrow send", zap.Error(err))
 			return
 		}
 	}
 
-	// For the break statement above, where a consumer could have received the
-	// stream already.
+	// For the break statement above, in case a sender is trying to use the stream.
 	stream.cancel()
 	for i := 0; i < ae.exporter.config.Arrow.NumStreams; i++ {
 		var alternate *arrowStream
@@ -259,7 +265,7 @@ func (ae *arrowExporter) writeStream(ctx context.Context, stream *arrowStream, w
 				return
 			}
 			ae.streams <- alternate
-		case wri := <-stream.writer:
+		case wri := <-stream.toWrite:
 			// a consumer got us first
 			wri.errCh <- status.Error(codes.Aborted, "stream is restarting")
 		}
@@ -305,7 +311,7 @@ func (ae *arrowExporter) processBatchStatus(stream *arrowStream, statuses []*arr
 // received by the stream reader.
 func (ae *arrowExporter) sendAndWait(ctx context.Context, stream *arrowStream, records interface{}) error {
 	errCh := make(chan error, 1)
-	stream.writer <- writeItem{
+	stream.toWrite <- writeItem{
 		records: records,
 		errCh:   errCh,
 	}
