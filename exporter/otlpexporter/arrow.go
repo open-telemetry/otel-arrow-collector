@@ -1,3 +1,17 @@
+// Copyright The OpenTelemetry Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//       http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package otlpexporter
 
 import (
@@ -42,7 +56,7 @@ type arrowExporter struct {
 }
 
 // streamPrioritizer is a placeholder for a configurable mechanism
-// that selects the next strea, to write.
+// that selects the next stream to write.
 type streamPrioritizer struct {
 	// channel will be closed to downgrade to standard OTLP,
 	// otherwise it returns the first-available.
@@ -60,19 +74,20 @@ type writeItem struct {
 
 // arrowStream is 1:1 with gRPC stream.
 type arrowStream struct {
+	// client uses the exporter's grpc.ClientConn.
 	client arrowpb.EventsService_EventStreamClient
 
 	// toWrite is passes a batch from the sender to the stream writer, which
 	// includes a dedicated channel for the response.
 	toWrite chan writeItem
 
-	// producer is exclusive to the holder of the stream
+	// producer is exclusive to the holder of the stream.
 	producer *batchEvent.Producer
 
-	// cancel cancels stream context
+	// cancel cancels stream context.
 	cancel context.CancelFunc
 
-	// lock protects waiters
+	// lock protects waiters.
 	lock sync.Mutex
 
 	// waiters is the response channel for each active batch.
