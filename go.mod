@@ -5,12 +5,12 @@ go 1.18
 require (
 	contrib.go.opencensus.io/exporter/prometheus v0.4.2
 	github.com/cenkalti/backoff/v4 v4.1.3
+	github.com/f5/otel-arrow-adapter v0.0.0-20221026190014-8b025131468d
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/snappy v0.0.4
 	github.com/google/uuid v1.3.0
 	github.com/klauspost/compress v1.15.11
 	github.com/knadh/koanf v1.4.3
-	github.com/lquerel/otel-arrow-adapter v0.0.0-20221012175720-a5ac55c73543
 	github.com/magiconair/properties v1.8.6
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/mostynb/go-grpc-compression v1.1.17
@@ -38,7 +38,6 @@ require (
 	go.uber.org/multierr v1.8.0
 	go.uber.org/zap v1.23.0
 	golang.org/x/net v0.0.0-20220225172249-27dd8689420f
-	golang.org/x/sync v0.0.0-20220601150217-0de741cfad7f
 	golang.org/x/sys v0.0.0-20220808155132-1c4a2a72c664
 	google.golang.org/genproto v0.0.0-20220126215142-9970aeb2e350
 	google.golang.org/grpc v1.49.0

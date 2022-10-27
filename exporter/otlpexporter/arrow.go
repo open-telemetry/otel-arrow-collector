@@ -19,8 +19,8 @@ import (
 	"fmt"
 	"sync"
 
-	arrowpb "github.com/lquerel/otel-arrow-adapter/api/collector/arrow/v1"
-	batchEvent "github.com/lquerel/otel-arrow-adapter/pkg/otel/batch_event"
+	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
+	batchEvent "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -42,7 +42,7 @@ type arrowExporter struct {
 	exporter *exporter
 
 	// client is created from the exporter's gRPC ClientConn.
-	client arrowpb.EventsServiceClient
+	client arrowpb.ArrowStreamServiceClient
 
 	// ready prioritizes streams that are ready to send
 	ready streamPrioritizer
@@ -80,7 +80,7 @@ type writeItem struct {
 // arrowStream is 1:1 with gRPC stream.
 type arrowStream struct {
 	// client uses the exporter's grpc.ClientConn.
-	client arrowpb.EventsService_EventStreamClient
+	client arrowpb.ArrowStreamService_ArrowStreamClient
 
 	// toWrite is passes a batch from the sender to the stream writer, which
 	// includes a dedicated channel for the response.
@@ -107,7 +107,7 @@ func (e *exporter) startArrowExporter() *arrowExporter {
 
 	ae := &arrowExporter{
 		exporter:  e,
-		client:    arrowpb.NewEventsServiceClient(e.clientConn),
+		client:    arrowpb.NewArrowStreamServiceClient(e.clientConn),
 		ready:     e.newPrioritizer(),
 		returning: make(chan *arrowStream, e.config.Arrow.NumStreams),
 		cancel:    bgcancel,
@@ -180,7 +180,7 @@ func (ae *arrowExporter) runArrowStream(bgctx context.Context) {
 		ae.returning <- stream
 	}()
 
-	sc, err := ae.client.EventStream(ctx, ae.exporter.callOptions...)
+	sc, err := ae.client.ArrowStream(ctx, ae.exporter.callOptions...)
 	if err != nil {
 		// TODO: only when this is a permanent (e.g., "no such
 		// method") error, downgrade to standard OTLP.
@@ -394,30 +394,25 @@ func (ae *arrowExporter) sendAndWait(ctx context.Context, stream *arrowStream, r
 }
 
 // encode produces the next batch of Arrow records.
-func (stream *arrowStream) encode(records interface{}) (*arrowpb.BatchEvent, error) {
+func (stream *arrowStream) encode(records interface{}) (*arrowpb.BatchArrowRecords, error) {
 	// Note!! This is a placeholder.  After this PR merges the
 	// code base will be upgraded to the latest version of
 	// github.com/f5/otel-arrow-adapter, which returns one
-	// BatchEvent per pdata Logs/Metrics/Traces.  The TODO below
+	// BatchArrowRecords per pdata Logs/Metrics/Traces.  The TODO below
 	// will be addressed, i.e., we will not drop all but one
 	// batch.
-	var batches []*arrowpb.BatchEvent
+	var batch *arrowpb.BatchArrowRecords
 	var err error
 	switch data := records.(type) {
 	case ptrace.Traces:
-		batches, err = stream.producer.BatchEventsFrom(data)
+		batch, err = stream.producer.BatchArrowRecordsFrom(data)
 	case plog.Logs:
-		// TODO: WIP in https://github.com/f5/otel-arrow-adapter/pull/13
+		// TODO e.g., batch, err = stream.producer.BatchArrowRecordsFrom(data)
+		// after https://github.com/f5/otel-arrow-adapter/pull/13.
 	case pmetric.Metrics:
 		// TODO: This will follow.
 	}
-	if err != nil {
-		return nil, err
-	}
-
-	// TODO: DO NOT DROP DATA batches[1..N], see note above.
-	batch := batches[0]
-	return batch, nil
+	return batch, err
 }
 
 // newPrioritizer constructs a channel-based first-available prioritizer.

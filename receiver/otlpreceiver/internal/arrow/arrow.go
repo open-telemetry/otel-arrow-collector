@@ -9,9 +9,9 @@ import (
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/obsreport"
 
-	arrowpb "github.com/lquerel/otel-arrow-adapter/api/collector/arrow/v1"
-	batchEvent "github.com/lquerel/otel-arrow-adapter/pkg/otel/batch_event"
-	"github.com/lquerel/otel-arrow-adapter/pkg/otel/traces"
+	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
+	batchEvent "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
+	"github.com/f5/otel-arrow-adapter/pkg/otel/traces"
 )
 
 const (
@@ -33,7 +33,7 @@ type Consumers interface {
 
 type Receiver struct {
 	Consumers
-	arrowpb.UnimplementedEventsServiceServer
+	arrowpb.UnimplementedArrowStreamServiceServer
 
 	obsrecv       *obsreport.Receiver
 	arrowConsumer *batchEvent.Consumer
@@ -63,7 +63,7 @@ func New(
 	}
 }
 
-func (r *Receiver) EventsStream(serverStream arrowpb.EventsService_EventStreamServer) error {
+func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStreamServer) error {
 	ctx := serverStream.Context()
 	producers := r.newProducers()
 
@@ -91,6 +91,8 @@ func (r *Receiver) EventsStream(serverStream arrowpb.EventsService_EventStreamSe
 		if err != nil {
 			return err
 		}
+
+		fmt.Println("WE DID IT")
 
 		// TODO: We are not required to return a Status per
 		// request, what should the logic be?  For now sending
