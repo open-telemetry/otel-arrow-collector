@@ -16,6 +16,7 @@ package otlpexporter
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	arrowpb "github.com/lquerel/otel-arrow-adapter/api/collector/arrow/v1"
@@ -24,6 +25,7 @@ import (
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
+	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -87,7 +89,7 @@ type arrowStream struct {
 	// producer is exclusive to the holder of the stream.
 	producer *batchEvent.Producer
 
-	// cancel cancels stream context.
+	// cancel cancels the stream context.
 	cancel context.CancelFunc
 
 	// lock protects waiters.
@@ -211,6 +213,8 @@ func (ae *arrowExporter) runArrowStream(bgctx context.Context) {
 	// The reader and writer have both finished; respond to any
 	// outstanding waiters.
 	for _, ch := range stream.waiters {
+		// Note: exporterhelper will retry.
+		// TODO: Would it be better to handle retry in this directly?
 		ch <- status.Error(codes.Aborted, "stream is restarting")
 	}
 }
@@ -307,25 +311,67 @@ func (ae *arrowExporter) readStream(ctx context.Context, stream *arrowStream) er
 			return err
 		}
 
-		ae.processBatchStatus(stream, resp.Statuses)
+		if err = stream.processBatchStatus(resp.Statuses); err != nil {
+			return err
+		}
 	}
 }
 
-// processBatchStatus processes a single response from the server.
-func (ae *arrowExporter) processBatchStatus(stream *arrowStream, statuses []*arrowpb.StatusMessage) {
+// getSenderChannels takes the stream lock and removes the corresonding sender
+// channel for each BatchId.
+func (stream *arrowStream) getSenderChannels(statuses []*arrowpb.StatusMessage) ([]chan error, error) {
+	var err error
+
+	fin := make([]chan error, len(statuses))
+
 	stream.lock.Lock()
 	defer stream.lock.Unlock()
 
-	for _, status := range statuses {
+	for idx, status := range statuses {
 		ch, ok := stream.waiters[status.BatchId]
 		if !ok {
-
+			// Will break the stream.
+			err = multierr.Append(err, fmt.Errorf("duplicate stream response: %s", status.BatchId))
 			continue
 		}
-
-		ch <- nil
 		delete(stream.waiters, status.BatchId)
+		fin[idx] = ch
 	}
+
+	return fin, err
+}
+
+// processBatchStatus processes a single response from the server and unblocks the
+// associated senders.
+func (stream *arrowStream) processBatchStatus(statuses []*arrowpb.StatusMessage) error {
+	fin, ret := stream.getSenderChannels(statuses)
+
+	for idx, ch := range fin {
+		status := statuses[idx]
+
+		if status.StatusCode == arrowpb.StatusCode_OK {
+			ch <- nil
+			continue
+		}
+		var err error
+		switch status.ErrorCode {
+		case arrowpb.ErrorCode_UNAVAILABLE:
+			// TODO: translate retry information into the form
+			// exporterhelper recognizes.
+			err = fmt.Errorf("destination unavailable: %s: %s", status.BatchId, status.ErrorMessage)
+		case arrowpb.ErrorCode_INVALID_ARGUMENT:
+			err = consumererror.NewPermanent(
+				fmt.Errorf("invalid argument: %s: %s", status.BatchId, status.ErrorMessage))
+		default:
+			base := fmt.Errorf("unexpected stream response: %s: %s", status.BatchId, status.ErrorMessage)
+			err = consumererror.NewPermanent(base)
+
+			// Will break the stream.
+			ret = multierr.Append(ret, base)
+		}
+		ch <- err
+	}
+	return ret
 }
 
 // sendAndWait submits a batch of records to be encoded and sent.  Meanwhile, this
@@ -415,7 +461,8 @@ func (sp *streamPrioritizer) removeReady(stream *arrowStream) {
 			}
 			sp.channel <- alternate
 		case wri := <-stream.toWrite:
-			// A consumer got us first.
+			// A consumer got us first.  Note: exporterhelper will retry.
+			// TODO: Would it be better to handle retry in this directly?
 			wri.errCh <- status.Error(codes.Aborted, "stream is restarting")
 		}
 	}
