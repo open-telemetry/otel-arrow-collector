@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
+	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -27,6 +28,37 @@ import (
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 )
+
+// Stream is 1:1 with gRPC stream.
+type Stream struct {
+	// client uses the exporter's grpc.ClientConn.
+	client arrowpb.ArrowStreamService_ArrowStreamClient
+
+	// toWrite is passes a batch from the sender to the stream writer, which
+	// includes a dedicated channel for the response.
+	toWrite chan writeItem
+
+	// producer is exclusive to the holder of the stream.
+	producer *arrowRecord.Producer
+
+	// cancel cancels the stream context.
+	cancel context.CancelFunc
+
+	// lock protects waiters.
+	lock sync.Mutex
+
+	// waiters is the response channel for each active batch.
+	waiters map[string]chan error
+}
+
+// writeItem is passed from the sender (a pipeline consumer) to the
+// stream writer, which is not bound by the sender's context.
+type writeItem struct {
+	// records is a ptrace.Traces, plog.Logs, or pmetric.Metrics
+	records interface{}
+	// errCh is used by the stream reader to unblock the sender
+	errCh chan error
+}
 
 // setBatchChannel places a waiting consumer's batchID into the waiters map, where
 // the stream reader may find it.

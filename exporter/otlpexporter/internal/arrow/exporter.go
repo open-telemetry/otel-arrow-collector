@@ -70,37 +70,6 @@ type Exporter struct {
 	wg sync.WaitGroup
 }
 
-// writeItem is passed from the sender (a pipeline consumer) to the
-// stream writer, which is not bound by the sender's context.
-type writeItem struct {
-	// records is a ptrace.Traces, plog.Logs, or pmetric.Metrics
-	records interface{}
-	// errCh is used by the stream reader to unblock the sender
-	errCh chan error
-}
-
-// Stream is 1:1 with gRPC stream.
-type Stream struct {
-	// client uses the exporter's grpc.ClientConn.
-	client arrowpb.ArrowStreamService_ArrowStreamClient
-
-	// toWrite is passes a batch from the sender to the stream writer, which
-	// includes a dedicated channel for the response.
-	toWrite chan writeItem
-
-	// producer is exclusive to the holder of the stream.
-	producer *arrowRecord.Producer
-
-	// cancel cancels the stream context.
-	cancel context.CancelFunc
-
-	// lock protects waiters.
-	lock sync.Mutex
-
-	// waiters is the response channel for each active batch.
-	waiters map[string]chan error
-}
-
 // NewExporter configures a new Exporter.
 func NewExporter(settings *ArrowSettings, telemetry component.TelemetrySettings, clientConn *grpc.ClientConn, grpcOptions []grpc.CallOption) *Exporter {
 	return &Exporter{
