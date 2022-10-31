@@ -30,6 +30,14 @@ type Config struct {
 	exporterhelper.RetrySettings   `mapstructure:"retry_on_failure"`
 
 	configgrpc.GRPCClientSettings `mapstructure:",squash"` // squash ensures fields are correctly decoded in embedded struct.
+
+	Arrow *ArrowSettings `mapstructure:"arrow"`
+}
+
+// ArrowSettings
+type ArrowSettings struct {
+	Enabled    bool `mapstructure:"enabled"`
+	NumStreams int  `mapstructure:"num_streams"`
 }
 
 var _ config.Exporter = (*Config)(nil)
@@ -38,6 +46,17 @@ var _ config.Exporter = (*Config)(nil)
 func (cfg *Config) Validate() error {
 	if err := cfg.QueueSettings.Validate(); err != nil {
 		return fmt.Errorf("queue settings has invalid configuration: %w", err)
+	}
+	if err := cfg.Arrow.Validate(); err != nil {
+		return fmt.Errorf("arrow settings has invalid configuration: %w", err)
+	}
+
+	return nil
+}
+
+func (cfg *ArrowSettings) Validate() error {
+	if cfg.NumStreams < 1 {
+		return fmt.Errorf("stream count should be > 0: %d", cfg.NumStreams)
 	}
 
 	return nil

@@ -23,6 +23,7 @@ import (
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
+	//"go.opentelemetry.io/collector/exporter/otlpexporter/internal/arrow"
 )
 
 const (
@@ -54,6 +55,18 @@ func createDefaultConfig() config.Exporter {
 			// We almost read 0 bytes, so no need to tune ReadBufferSize.
 			WriteBufferSize: 512 * 1024,
 		},
+		Arrow: nil, // &ArrowSettings{NumStreams: 1, Enabled: false},
+	}
+}
+
+func (oce *exporter) helperOptions() []exporterhelper.Option {
+	return []exporterhelper.Option{
+		exporterhelper.WithCapabilities(consumer.Capabilities{MutatesData: false}),
+		exporterhelper.WithTimeout(oce.config.TimeoutSettings),
+		exporterhelper.WithRetry(oce.config.RetrySettings),
+		exporterhelper.WithQueue(oce.config.QueueSettings),
+		exporterhelper.WithStart(oce.start),
+		exporterhelper.WithShutdown(oce.shutdown),
 	}
 }
 
@@ -66,15 +79,10 @@ func createTracesExporter(
 	if err != nil {
 		return nil, err
 	}
-	oCfg := cfg.(*Config)
-	return exporterhelper.NewTracesExporter(ctx, set, cfg,
+	return exporterhelper.NewTracesExporter(ctx, oce.settings, oce.config,
 		oce.pushTraces,
-		exporterhelper.WithCapabilities(consumer.Capabilities{MutatesData: false}),
-		exporterhelper.WithTimeout(oCfg.TimeoutSettings),
-		exporterhelper.WithRetry(oCfg.RetrySettings),
-		exporterhelper.WithQueue(oCfg.QueueSettings),
-		exporterhelper.WithStart(oce.start),
-		exporterhelper.WithShutdown(oce.shutdown))
+		oce.helperOptions()...,
+	)
 }
 
 func createMetricsExporter(
@@ -86,15 +94,9 @@ func createMetricsExporter(
 	if err != nil {
 		return nil, err
 	}
-	oCfg := cfg.(*Config)
-	return exporterhelper.NewMetricsExporter(ctx, set, cfg,
+	return exporterhelper.NewMetricsExporter(ctx, oce.settings, oce.config,
 		oce.pushMetrics,
-		exporterhelper.WithCapabilities(consumer.Capabilities{MutatesData: false}),
-		exporterhelper.WithTimeout(oCfg.TimeoutSettings),
-		exporterhelper.WithRetry(oCfg.RetrySettings),
-		exporterhelper.WithQueue(oCfg.QueueSettings),
-		exporterhelper.WithStart(oce.start),
-		exporterhelper.WithShutdown(oce.shutdown),
+		oce.helperOptions()...,
 	)
 }
 
@@ -107,14 +109,8 @@ func createLogsExporter(
 	if err != nil {
 		return nil, err
 	}
-	oCfg := cfg.(*Config)
-	return exporterhelper.NewLogsExporter(ctx, set, cfg,
+	return exporterhelper.NewLogsExporter(ctx, oce.settings, oce.config,
 		oce.pushLogs,
-		exporterhelper.WithCapabilities(consumer.Capabilities{MutatesData: false}),
-		exporterhelper.WithTimeout(oCfg.TimeoutSettings),
-		exporterhelper.WithRetry(oCfg.RetrySettings),
-		exporterhelper.WithQueue(oCfg.QueueSettings),
-		exporterhelper.WithStart(oce.start),
-		exporterhelper.WithShutdown(oce.shutdown),
+		oce.helperOptions()...,
 	)
 }

@@ -51,15 +51,18 @@ type exporter struct {
 	metadata       metadata.MD
 	callOptions    []grpc.CallOption
 
-	settings component.TelemetrySettings
+	settings component.ExporterCreateSettings
 
 	// Default user-agent header.
 	userAgent string
+
+	// OTLP+Arrow optional state
+	arrow *arrowExporter
 }
 
 // Crete new exporter and start it. The exporter will begin connecting but
 // this function may return before the connection is established.
-func newExporter(cfg config.Exporter, set component.ExporterCreateSettings) (*exporter, error) {
+func newExporter(cfg config.Exporter, settings component.ExporterCreateSettings) (*exporter, error) {
 	oCfg := cfg.(*Config)
 
 	if oCfg.Endpoint == "" {
@@ -67,24 +70,30 @@ func newExporter(cfg config.Exporter, set component.ExporterCreateSettings) (*ex
 	}
 
 	userAgent := fmt.Sprintf("%s/%s (%s/%s)",
-		set.BuildInfo.Description, set.BuildInfo.Version, runtime.GOOS, runtime.GOARCH)
+		settings.BuildInfo.Description, settings.BuildInfo.Version, runtime.GOOS, runtime.GOARCH)
 
-	return &exporter{config: oCfg, settings: set.TelemetrySettings, userAgent: userAgent}, nil
+	if oCfg.Arrow != nil && oCfg.Arrow.Enabled {
+		userAgent += fmt.Sprint(" arrow/enabled (...)") // TODO
+	}
+
+	return &exporter{config: oCfg, settings: settings, userAgent: userAgent}, nil
 }
 
 // start actually creates the gRPC connection. The client construction is deferred till this point as this
 // is the only place we get hold of Extensions which are required to construct auth round tripper.
-func (e *exporter) start(ctx context.Context, host component.Host) (err error) {
-	dialOpts, err := e.config.GRPCClientSettings.ToDialOptions(host, e.settings)
+func (e *exporter) start(ctx context.Context, host component.Host) error {
+	dialOpts, err := e.config.GRPCClientSettings.ToDialOptions(host, e.settings.TelemetrySettings)
 	if err != nil {
 		return err
 	}
 	dialOpts = append(dialOpts, grpc.WithUserAgent(e.userAgent))
 
-	if e.clientConn, err = grpc.DialContext(ctx, e.config.GRPCClientSettings.SanitizedEndpoint(), dialOpts...); err != nil {
+	cc, err := grpc.DialContext(ctx, e.config.GRPCClientSettings.SanitizedEndpoint(), dialOpts...)
+	if err != nil {
 		return err
 	}
 
+	e.clientConn = cc
 	e.traceExporter = ptraceotlp.NewClient(e.clientConn)
 	e.metricExporter = pmetricotlp.NewClient(e.clientConn)
 	e.logExporter = plogotlp.NewClient(e.clientConn)
@@ -93,29 +102,56 @@ func (e *exporter) start(ctx context.Context, host component.Host) (err error) {
 		grpc.WaitForReady(e.config.GRPCClientSettings.WaitForReady),
 	}
 
-	return
+	if e.config.Arrow != nil && e.config.Arrow.Enabled {
+		e.arrow = e.startArrowExporter()
+	}
+
+	return nil
 }
 
-func (e *exporter) shutdown(context.Context) error {
-	return e.clientConn.Close()
+func (e *exporter) shutdown(ctx context.Context) error {
+	err := e.clientConn.Close()
+
+	if e.arrow != nil {
+		err2 := e.arrow.shutdown(ctx)
+		if err2 != nil && err == nil {
+			err = err2
+		}
+	}
+	return err
 }
 
 func (e *exporter) pushTraces(ctx context.Context, td ptrace.Traces) error {
+	if stream, err := e.getArrowStream(ctx); err != nil {
+		return err
+	} else if stream != nil {
+		return e.arrow.sendAndWait(ctx, stream, td)
+	}
 	req := ptraceotlp.NewRequestFromTraces(td)
 	_, err := e.traceExporter.Export(e.enhanceContext(ctx), req, e.callOptions...)
-	return processError(err)
+	return processGRPCError(err)
 }
 
 func (e *exporter) pushMetrics(ctx context.Context, md pmetric.Metrics) error {
+	if stream, err := e.getArrowStream(ctx); err != nil {
+		return err
+	} else if stream != nil {
+		return e.arrow.sendAndWait(ctx, stream, md)
+	}
 	req := pmetricotlp.NewRequestFromMetrics(md)
 	_, err := e.metricExporter.Export(e.enhanceContext(ctx), req, e.callOptions...)
-	return processError(err)
+	return processGRPCError(err)
 }
 
 func (e *exporter) pushLogs(ctx context.Context, ld plog.Logs) error {
+	if stream, err := e.getArrowStream(ctx); err != nil {
+		return err
+	} else if stream != nil {
+		return e.arrow.sendAndWait(ctx, stream, ld)
+	}
 	req := plogotlp.NewRequestFromLogs(ld)
 	_, err := e.logExporter.Export(e.enhanceContext(ctx), req, e.callOptions...)
-	return processError(err)
+	return processGRPCError(err)
 }
 
 func (e *exporter) enhanceContext(ctx context.Context) context.Context {
@@ -125,7 +161,7 @@ func (e *exporter) enhanceContext(ctx context.Context) context.Context {
 	return ctx
 }
 
-func processError(err error) error {
+func processGRPCError(err error) error {
 	if err == nil {
 		// Request is successful, we are done.
 		return nil
