@@ -21,6 +21,7 @@ import (
 	"runtime"
 	"time"
 
+	"go.uber.org/multierr"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -31,6 +32,7 @@ import (
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
+	"go.opentelemetry.io/collector/exporter/otlpexporter/internal/arrow"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -57,7 +59,7 @@ type exporter struct {
 	userAgent string
 
 	// OTLP+Arrow optional state
-	arrow *arrowExporter
+	arrow *arrow.Exporter
 }
 
 // Crete new exporter and start it. The exporter will begin connecting but
@@ -105,39 +107,41 @@ func (e *exporter) start(ctx context.Context, host component.Host) error {
 	if e.config.Arrow != nil && e.config.Arrow.Enabled {
 		ctx := e.enhanceContext(context.Background())
 
-		e.arrow = startArrowExporter(ctx, e.config.Arrow, e.settings.TelemetrySettings, e.clientConn, e.callOptions)
+		e.arrow = arrow.NewExporter(e.config.Arrow, e.settings.TelemetrySettings, e.clientConn, e.callOptions)
+
+		if err := e.arrow.Start(ctx); err != nil {
+			return err
+		}
 	}
 
 	return nil
 }
 
 func (e *exporter) shutdown(ctx context.Context) error {
-	err := e.clientConn.Close()
-
+	var err error
 	if e.arrow != nil {
-		err2 := e.arrow.shutdown(ctx)
-		if err2 != nil && err == nil {
-			err = err2
-		}
+		err = multierr.Append(err, e.arrow.Shutdown(ctx))
 	}
+	err = multierr.Append(err, e.clientConn.Close())
+
 	return err
 }
 
 // getArrowStream returns the first-available stream when Arrow is
 // configured.  This returns nil when the consumer should fall back to
 // standard OTLP.
-func (e *exporter) getArrowStream(ctx context.Context) (*arrowStream, error) {
+func (e *exporter) getArrowStream(ctx context.Context) (*arrow.Stream, error) {
 	if e.arrow == nil {
 		return nil, nil
 	}
-	return e.arrow.getStream(ctx)
+	return e.arrow.GetStream(ctx)
 }
 
 func (e *exporter) pushTraces(ctx context.Context, td ptrace.Traces) error {
 	if stream, err := e.getArrowStream(ctx); err != nil {
 		return err
 	} else if stream != nil {
-		return e.arrow.sendAndWait(ctx, stream, td)
+		return stream.SendAndWait(ctx, td)
 	}
 	req := ptraceotlp.NewRequestFromTraces(td)
 	_, err := e.traceExporter.Export(e.enhanceContext(ctx), req, e.callOptions...)
@@ -148,7 +152,7 @@ func (e *exporter) pushMetrics(ctx context.Context, md pmetric.Metrics) error {
 	if stream, err := e.getArrowStream(ctx); err != nil {
 		return err
 	} else if stream != nil {
-		return e.arrow.sendAndWait(ctx, stream, md)
+		return stream.SendAndWait(ctx, md)
 	}
 	req := pmetricotlp.NewRequestFromMetrics(md)
 	_, err := e.metricExporter.Export(e.enhanceContext(ctx), req, e.callOptions...)
@@ -159,7 +163,7 @@ func (e *exporter) pushLogs(ctx context.Context, ld plog.Logs) error {
 	if stream, err := e.getArrowStream(ctx); err != nil {
 		return err
 	} else if stream != nil {
-		return e.arrow.sendAndWait(ctx, stream, ld)
+		return stream.SendAndWait(ctx, ld)
 	}
 	req := plogotlp.NewRequestFromLogs(ld)
 	_, err := e.logExporter.Export(e.enhanceContext(ctx), req, e.callOptions...)
