@@ -32,7 +32,7 @@ type Config struct {
 
 	configgrpc.GRPCClientSettings `mapstructure:",squash"` // squash ensures fields are correctly decoded in embedded struct.
 
-	Arrow *arrow.ArrowSettings `mapstructure:"arrow"`
+	Arrow *arrow.Settings `mapstructure:"arrow"`
 }
 
 var _ config.Exporter = (*Config)(nil)

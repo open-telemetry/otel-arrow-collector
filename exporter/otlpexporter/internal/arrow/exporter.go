@@ -20,11 +20,12 @@ import (
 
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
 	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
-	"go.opentelemetry.io/collector/component"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"go.opentelemetry.io/collector/component"
 )
 
 // High-level TODOs:
@@ -34,7 +35,7 @@ import (
 // functionality.
 type Exporter struct {
 	// settings contains Arrow-specific parameters.
-	settings *ArrowSettings
+	settings *Settings
 
 	// telemetry includes logger, tracer, meter.
 	telemetry component.TelemetrySettings
@@ -71,7 +72,7 @@ type Exporter struct {
 }
 
 // NewExporter configures a new Exporter.
-func NewExporter(settings *ArrowSettings, telemetry component.TelemetrySettings, clientConn *grpc.ClientConn, grpcOptions []grpc.CallOption) *Exporter {
+func NewExporter(settings *Settings, telemetry component.TelemetrySettings, clientConn *grpc.ClientConn, grpcOptions []grpc.CallOption) *Exporter {
 	return &Exporter{
 		settings:    settings,
 		telemetry:   telemetry,
@@ -166,7 +167,7 @@ func (e *Exporter) runArrowStream(bgctx context.Context) {
 		// lack of an Arrow stream endpoint.  When all the
 		// streams return with .client == nil, the ready
 		// channel will be closed.
-		e.telemetry.Logger.Error("cannnot start event stream", zap.Error(err))
+		e.telemetry.Logger.Error("cannot start event stream", zap.Error(err))
 		return
 	}
 	// Setting .client != nil indicates that the endpoint was valid,

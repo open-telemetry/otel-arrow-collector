@@ -16,18 +16,26 @@ package arrow
 
 import "fmt"
 
-// ArrowSettings includes whether Arrow is enabled and the number of
+// Settings includes whether Arrow is enabled and the number of
 // concurrent Arrow streams.
-type ArrowSettings struct {
+type Settings struct {
 	Enabled    bool `mapstructure:"enabled"`
 	NumStreams int  `mapstructure:"num_streams"`
 }
 
 // Validate returns an error when the number of streams is less than 1.
-func (cfg *ArrowSettings) Validate() error {
+func (cfg *Settings) Validate() error {
 	if cfg.NumStreams < 1 {
 		return fmt.Errorf("stream count should be > 0: %d", cfg.NumStreams)
 	}
 
 	return nil
+}
+
+// NewDefaultSettings returns a default Settings, in which Arrow is disabled.
+func NewDefaultSettings() *Settings {
+	return &Settings{
+		NumStreams: 1,
+		Enabled:    false,
+	}
 }

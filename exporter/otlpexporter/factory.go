@@ -23,7 +23,7 @@ import (
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
-	//"go.opentelemetry.io/collector/exporter/otlpexporter/internal/arrow"
+	"go.opentelemetry.io/collector/exporter/otlpexporter/internal/arrow"
 )
 
 const (
@@ -55,7 +55,7 @@ func createDefaultConfig() config.Exporter {
 			// We almost read 0 bytes, so no need to tune ReadBufferSize.
 			WriteBufferSize: 512 * 1024,
 		},
-		Arrow: nil, // &ArrowSettings{NumStreams: 1, Enabled: false},
+		Arrow: arrow.NewDefaultSettings(),
 	}
 }
 

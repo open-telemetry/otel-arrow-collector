@@ -39,7 +39,7 @@ type Receiver struct {
 	arrowConsumer *batchEvent.Consumer
 }
 
-type producers struct {
+type allProducers struct {
 	Traces *traces.OtlpProducer
 	// TODO: Logs
 	// TODO: Metrics
@@ -92,8 +92,6 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStre
 			return err
 		}
 
-		fmt.Println("WE DID IT")
-
 		// TODO: We are not required to return a Status per
 		// request, what should the logic be?  For now sending
 		// one status per request received:
@@ -108,11 +106,14 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStre
 		}
 		resp.Statuses = append(resp.Statuses, status)
 
-		serverStream.Send(resp)
+		err = serverStream.Send(resp)
+		if err != nil {
+			return err
+		}
 	}
 }
 
-func (r *Receiver) processRecords(ctx context.Context, records []*batchEvent.RecordMessage, producers producers) error {
+func (r *Receiver) processRecords(ctx context.Context, records []*batchEvent.RecordMessage, producers allProducers) error {
 	for _, msg := range records {
 		switch msg.PayloadType() {
 		case arrowpb.OtlpArrowPayloadType_METRICS:
@@ -142,7 +143,7 @@ func (r *Receiver) processRecords(ctx context.Context, records []*batchEvent.Rec
 	return nil
 }
 
-func (r *Receiver) newProducers() (p producers) {
+func (r *Receiver) newProducers() (p allProducers) {
 	if r.Traces() != nil {
 		p.Traces = traces.NewOtlpProducer()
 	}

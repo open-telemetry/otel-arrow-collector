@@ -21,12 +21,13 @@ import (
 
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
 	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
+	"go.uber.org/multierr"
+	"go.uber.org/zap"
+
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
-	"go.uber.org/multierr"
-	"go.uber.org/zap"
 )
 
 // Stream is 1:1 with gRPC stream.
@@ -120,7 +121,10 @@ func (s *Stream) write(ctx context.Context, e *Exporter, ww *sync.WaitGroup) {
 
 // read repeatedly reads a batch status and releases the consumers waiting for
 // a response.
-func (s *Stream) read(ctx context.Context) error {
+func (s *Stream) read(_ context.Context) error {
+	// Note we do not use the context, the stream context might
+	// cancel a call to Recv() but the call to processBatchStatus
+	// is non-blocking.
 	defer s.cancel()
 
 	for {

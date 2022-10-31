@@ -74,9 +74,12 @@ func newExporter(cfg config.Exporter, settings component.ExporterCreateSettings)
 	userAgent := fmt.Sprintf("%s/%s (%s/%s)",
 		settings.BuildInfo.Description, settings.BuildInfo.Version, runtime.GOOS, runtime.GOARCH)
 
-	if oCfg.Arrow != nil && oCfg.Arrow.Enabled {
-		userAgent += fmt.Sprint(" arrow/enabled (...)") // TODO
-	}
+	// TODO: this requires a future version of arrow relative to
+	// what otel-arrow-adapter uses:
+	// import arrowPkg "github.com/apache/arrow/go/v10/arrow"
+	// if oCfg.Arrow != nil && oCfg.Arrow.Enabled {
+	// 	userAgent += fmt.Sprint(" ApacheArrow/enabled (%s)", arrowPkg.PkgVersion)
+	// }
 
 	return &exporter{config: oCfg, settings: settings, userAgent: userAgent}, nil
 }

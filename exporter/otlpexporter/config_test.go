@@ -29,6 +29,7 @@ import (
 	"go.opentelemetry.io/collector/confmap"
 	"go.opentelemetry.io/collector/confmap/confmaptest"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
+	"go.opentelemetry.io/collector/exporter/otlpexporter/internal/arrow"
 )
 
 func TestUnmarshalDefaultConfig(t *testing.T) {
@@ -83,6 +84,10 @@ func TestUnmarshalConfig(t *testing.T) {
 				WriteBufferSize: 512 * 1024,
 				BalancerName:    "round_robin",
 				Auth:            &configauth.Authentication{AuthenticatorID: config.NewComponentID("nop")},
+			},
+			Arrow: &arrow.Settings{
+				Enabled:    false,
+				NumStreams: 1,
 			},
 		}, cfg)
 }
