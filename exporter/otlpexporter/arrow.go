@@ -21,12 +21,14 @@ import (
 
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
 	batchEvent "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
+	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -37,9 +39,15 @@ import (
 // arrowExporter is 1:1 with exporter, isolates arrow-specific
 // functionality.
 type arrowExporter struct {
-	// exporter allows this to refer to all the settings.  Note
-	// there is a pointer cycle, exporter refers to this object.
-	exporter *exporter
+	// settings contains Arrow-specific parameters.
+	settings *ArrowSettings
+
+	// telemetry includes logger, tracer, meter.
+	telemetry component.TelemetrySettings
+
+	// grpcOptions includes options used by the unary RPC methods,
+	// e.g., WaitForReady.
+	grpcOptions []grpc.CallOption
 
 	// client is created from the exporter's gRPC ClientConn.
 	client arrowpb.ArrowStreamServiceClient
@@ -56,16 +64,16 @@ type arrowExporter struct {
 	cancel context.CancelFunc
 
 	// wg counts one per active goroutine belonging to all strings
-	// of this exporter.
+	// of this exporter.  The wait group has Add(1) called before
+	// starting goroutines so that they can be properly waited for
+	// in shutdown(), so the pattern is:
+	//
+	//   wg.Add(1)
+	//   go func() {
+	//     defer wg.Done()
+	//     ...
+	//   }()
 	wg sync.WaitGroup
-}
-
-// streamPrioritizer is a placeholder for a configurable mechanism
-// that selects the next stream to write.
-type streamPrioritizer struct {
-	// channel will be closed to downgrade to standard OTLP,
-	// otherwise it returns the first-available.
-	channel chan *arrowStream
 }
 
 // writeItem is passed from the sender (a pipeline consumer) to the
@@ -101,19 +109,20 @@ type arrowStream struct {
 
 // startArrowExporter creates the background context used by all streams and
 // starts a stream controller, which initializes the initial set of streams.
-func (e *exporter) startArrowExporter() *arrowExporter {
-	bgctx, bgcancel := context.WithCancel(context.Background())
-	bgctx = e.enhanceContext(bgctx)
+func startArrowExporter(ctx context.Context, settings *ArrowSettings, telemetry component.TelemetrySettings, clientConn *grpc.ClientConn, grpcOptions []grpc.CallOption) *arrowExporter {
+	ctx, cancel := context.WithCancel(ctx)
 
 	ae := &arrowExporter{
-		exporter:  e,
-		client:    arrowpb.NewArrowStreamServiceClient(e.clientConn),
-		ready:     e.newPrioritizer(),
-		returning: make(chan *arrowStream, e.config.Arrow.NumStreams),
-		cancel:    bgcancel,
+		settings:    settings,
+		telemetry:   telemetry,
+		grpcOptions: grpcOptions,
+		client:      arrowpb.NewArrowStreamServiceClient(clientConn),
+		ready:       newStreamPrioritizer(settings),
+		returning:   make(chan *arrowStream, settings.NumStreams),
+		cancel:      cancel,
 	}
 	ae.wg.Add(1)
-	go ae.runStreamController(bgctx)
+	go ae.runStreamController(ctx)
 
 	return ae
 }
@@ -126,7 +135,7 @@ func (ae *arrowExporter) runStreamController(bgctx context.Context) {
 	defer ae.cancel()
 	defer ae.wg.Done()
 
-	running := ae.exporter.config.Arrow.NumStreams
+	running := ae.settings.NumStreams
 
 	// Start the initial number of streams
 	for i := 0; i < running; i++ {
@@ -150,6 +159,7 @@ func (ae *arrowExporter) runStreamController(bgctx context.Context) {
 			// None of the streams were able to connect to
 			// an Arrow endpoint.
 			if running == 0 {
+				ae.telemetry.Logger.Info("failed to establish OTLP+Arrow streaming, downgrading")
 				ae.ready.downgrade()
 			}
 
@@ -180,7 +190,7 @@ func (ae *arrowExporter) runArrowStream(bgctx context.Context) {
 		ae.returning <- stream
 	}()
 
-	sc, err := ae.client.ArrowStream(ctx, ae.exporter.callOptions...)
+	sc, err := ae.client.ArrowStream(ctx, ae.grpcOptions...)
 	if err != nil {
 		// TODO: only when this is a permanent (e.g., "no such
 		// method") error, downgrade to standard OTLP.
@@ -188,7 +198,7 @@ func (ae *arrowExporter) runArrowStream(bgctx context.Context) {
 		// lack of an Arrow stream endpoint.  When all the
 		// streams return with .client == nil, the ready
 		// channel will be closed.
-		ae.exporter.settings.Logger.Error("cannnot start event stream", zap.Error(err))
+		ae.telemetry.Logger.Error("cannnot start event stream", zap.Error(err))
 		return
 	}
 	// Setting .client != nil indicates that the endpoint was valid,
@@ -204,7 +214,7 @@ func (ae *arrowExporter) runArrowStream(bgctx context.Context) {
 
 	if err := ae.readStream(ctx, stream); err != nil {
 		// TODO: should this log even an io.EOF error?
-		ae.exporter.settings.Logger.Error("arrow recv", zap.Error(err))
+		ae.telemetry.Logger.Error("arrow recv", zap.Error(err))
 	}
 
 	// Wait for the writer to ensure that all waiters are known.
@@ -219,16 +229,12 @@ func (ae *arrowExporter) runArrowStream(bgctx context.Context) {
 	}
 }
 
-// getArrowStream returns the first-available stream.  This returns nil
-// when the consumer should fall back to standard OTLP.
-func (e *exporter) getArrowStream(ctx context.Context) (*arrowStream, error) {
-	if e.arrow == nil {
-		return nil, nil
-	}
+// getStream is called to get an available stream with the user's pipeline context.
+func (ae *arrowExporter) getStream(ctx context.Context) (*arrowStream, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case stream := <-e.arrow.ready.readyChannel():
+	case stream := <-ae.ready.readyChannel():
 		return stream, nil
 	}
 }
@@ -256,7 +262,6 @@ func (ae *arrowExporter) writeStream(ctx context.Context, stream *arrowStream, w
 	defer ww.Done()
 	defer stream.cancel()
 
-writeLoop:
 	for {
 		// Note: this can't block b/c stream has capacity &
 		// individual streams shut down synchronously.
@@ -268,9 +273,12 @@ writeLoop:
 		select {
 		case wri = <-stream.toWrite:
 		case <-ctx.Done():
-			// Because we did not <-stream.toWrite, there is a potential
-			// sender race happening, which is handled below.
-			break writeLoop
+			// Because we did not <-stream.toWrite, there
+			// is a potential sender race since the stream
+			// is currently in the ready set.  Call
+			// removeReady() in this case.
+			ae.ready.removeReady(stream)
+			return
 		}
 		// Note: For the two return statements below there is no potential
 		// sender race because the stream is not available, as indicated by
@@ -283,7 +291,7 @@ writeLoop:
 			//
 			// This is some kind of internal error.
 			wri.errCh <- consumererror.NewPermanent(err)
-			ae.exporter.settings.Logger.Error("arrow encode", zap.Error(err))
+			ae.telemetry.Logger.Error("arrow encode", zap.Error(err))
 			return
 		}
 
@@ -291,13 +299,10 @@ writeLoop:
 
 		if err := stream.client.Send(batch); err != nil {
 			// The error will be sent to errCh during cleanup for this stream.
-			ae.exporter.settings.Logger.Error("arrow send", zap.Error(err))
+			ae.telemetry.Logger.Error("arrow send", zap.Error(err))
 			return
 		}
 	}
-
-	// Remove this from the ready channel.
-	ae.ready.removeReady(stream)
 }
 
 // readStream repeatedly reads a batch status and releases the consumers waiting for
@@ -415,10 +420,18 @@ func (stream *arrowStream) encode(records interface{}) (*arrowpb.BatchArrowRecor
 	return batch, err
 }
 
-// newPrioritizer constructs a channel-based first-available prioritizer.
-func (e *exporter) newPrioritizer() streamPrioritizer {
+// streamPrioritizer is a placeholder for a configurable mechanism
+// that selects the next stream to write.
+type streamPrioritizer struct {
+	// channel will be closed to downgrade to standard OTLP,
+	// otherwise it returns the first-available.
+	channel chan *arrowStream
+}
+
+// newStreamPrioritizer constructs a channel-based first-available prioritizer.
+func newStreamPrioritizer(settings *ArrowSettings) streamPrioritizer {
 	return streamPrioritizer{
-		make(chan *arrowStream, e.config.Arrow.NumStreams),
+		make(chan *arrowStream, settings.NumStreams),
 	}
 }
 

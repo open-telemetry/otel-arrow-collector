@@ -103,7 +103,9 @@ func (e *exporter) start(ctx context.Context, host component.Host) error {
 	}
 
 	if e.config.Arrow != nil && e.config.Arrow.Enabled {
-		e.arrow = e.startArrowExporter()
+		ctx := e.enhanceContext(context.Background())
+
+		e.arrow = startArrowExporter(ctx, e.config.Arrow, e.settings.TelemetrySettings, e.clientConn, e.callOptions)
 	}
 
 	return nil
@@ -119,6 +121,16 @@ func (e *exporter) shutdown(ctx context.Context) error {
 		}
 	}
 	return err
+}
+
+// getArrowStream returns the first-available stream when Arrow is
+// configured.  This returns nil when the consumer should fall back to
+// standard OTLP.
+func (e *exporter) getArrowStream(ctx context.Context) (*arrowStream, error) {
+	if e.arrow == nil {
+		return nil, nil
+	}
+	return e.arrow.getStream(ctx)
 }
 
 func (e *exporter) pushTraces(ctx context.Context, td ptrace.Traces) error {
