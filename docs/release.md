@@ -37,7 +37,8 @@ It is possible that a core approver isn't a contrib approver. In that case, the 
 
 1. Prepare Core for release.
 
-    * Update CHANGELOG.md file and rename the Unreleased section to the new release name. Add a new unreleased section at top. Use commit history feature to get the list of commits since the last release to help understand what should be in the release notes, e.g.: https://github.com/open-telemetry/opentelemetry-collector/compare/v0.44.0...main. Commit the changes.
+    * Update CHANGELOG.md file, this is done via `chloggen`. Run the following command from the root of the opentelemetry-collector-contrib repo:
+      * `make chlog-update VERSION=v0.55.0`
 
     * Run `make prepare-release PREVIOUS_VERSION=0.52.0 RELEASE_CANDIDATE=0.53.0`
 
@@ -59,7 +60,7 @@ It is possible that a core approver isn't a contrib approver. In that case, the 
 
 1. Prepare Contrib for release.
 
-  * Update CHANGELOG.md file, this is now done via `chloggen`. Run the following command from the root of the opentelemetry-collector-contrib repo:
+  * Update CHANGELOG.md file, this is done via `chloggen`. Run the following command from the root of the opentelemetry-collector-contrib repo:
       * `make chlog-update VERSION=v0.55.0`
 
   * Use multimod to update the version of the collector package:
@@ -128,10 +129,10 @@ The OpenTelemetry Collector maintainers will ultimately have the responsibility 
 
 | Date       | Version | Release manager |
 |------------|---------|-----------------|
-| 2022-09-28 | v0.61.0 | @codeboten      |
-| 2022-10-12 | v0.62.0 | @tigrannajaryan |
 | 2022-10-26 | v0.63.0 | @dmitryax       |
 | 2022-11-09 | v0.64.0 | @jpkrohling     |
-| 2022-11-23 | v0.65.0 | @bogdandrutu    |
+| 2022-11-23 | v0.65.0 | @tigrannajaryan |
 | 2022-12-07 | v0.66.0 | @Aneurysm9      |
 | 2022-12-21 | v0.67.0 | @mx-psi         |
+| 2023-01-04 | v0.68.0 | @codeboten      |
+| 2023-01-16 | v0.69.0 | @bogdandrutu    |

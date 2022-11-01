@@ -57,19 +57,47 @@ func (l *Conf) AllKeys() []string {
 	return l.k.Keys()
 }
 
-// Unmarshal unmarshalls the config into a struct.
-// Tags on the fields of the structure must be properly set.
-func (l *Conf) Unmarshal(result interface{}) error {
-	return decodeConfig(l, result, false)
+type UnmarshalOption interface {
+	apply(*unmarshalOption)
 }
 
-// UnmarshalExact unmarshalls the config into a struct, erroring if a field is nonexistent.
-func (l *Conf) UnmarshalExact(result interface{}) error {
-	return decodeConfig(l, result, true)
+type unmarshalOption struct {
+	errorUnused bool
+}
+
+// WithErrorUnused sets an option to error when there are existing
+// keys in the original Conf that were unused in the decoding process
+// (extra keys).
+func WithErrorUnused() UnmarshalOption {
+	return unmarshalOptionFunc(func(uo *unmarshalOption) {
+		uo.errorUnused = true
+	})
+}
+
+type unmarshalOptionFunc func(*unmarshalOption)
+
+func (fn unmarshalOptionFunc) apply(set *unmarshalOption) {
+	fn(set)
+}
+
+// Unmarshal unmarshalls the config into a struct using the given options.
+// Tags on the fields of the structure must be properly set.
+func (l *Conf) Unmarshal(result interface{}, opts ...UnmarshalOption) error {
+	set := unmarshalOption{}
+	for _, opt := range opts {
+		opt.apply(&set)
+	}
+	return decodeConfig(l, result, set.errorUnused)
+}
+
+type marshalOption struct{}
+
+type MarshalOption interface {
+	apply(*marshalOption)
 }
 
 // Marshal encodes the config and merges it into the Conf.
-func (l *Conf) Marshal(rawVal interface{}) error {
+func (l *Conf) Marshal(rawVal interface{}, _ ...MarshalOption) error {
 	enc := encoder.New(encoderConfig(rawVal))
 	data, err := enc.Encode(rawVal)
 	if err != nil {
@@ -245,20 +273,25 @@ func unmarshalerHookFunc(result interface{}) mapstructure.DecodeHookFuncValue {
 		}
 
 		toPtr := to.Addr().Interface()
-		if _, ok := toPtr.(Unmarshaler); !ok {
-			return from.Interface(), nil
-		}
-
-		if _, ok := from.Interface().(map[string]interface{}); !ok {
-			return from.Interface(), nil
-		}
-
 		// Need to ignore the top structure to avoid circular dependency.
 		if toPtr == result {
 			return from.Interface(), nil
 		}
 
-		unmarshaler := reflect.New(to.Type()).Interface().(Unmarshaler)
+		unmarshaler, ok := toPtr.(Unmarshaler)
+		if !ok {
+			return from.Interface(), nil
+		}
+
+		if _, ok = from.Interface().(map[string]interface{}); !ok {
+			return from.Interface(), nil
+		}
+
+		// Use the current object if not nil (to preserve other configs in the object), otherwise zero initialize.
+		if to.Addr().IsNil() {
+			unmarshaler = reflect.New(to.Type()).Interface().(Unmarshaler)
+		}
+
 		if err := unmarshaler.Unmarshal(NewFromStringMap(from.Interface().(map[string]interface{}))); err != nil {
 			return nil, err
 		}

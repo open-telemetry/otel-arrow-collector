@@ -118,7 +118,7 @@ func TestExpandNilStructPointersHookFunc(t *testing.T) {
 	conf := NewFromStringMap(stringMap)
 	cfg := &TestConfig{}
 	assert.Nil(t, cfg.Struct)
-	assert.NoError(t, conf.UnmarshalExact(cfg))
+	assert.NoError(t, conf.Unmarshal(cfg))
 	assert.Nil(t, cfg.Boolean)
 	// assert.False(t, *cfg.Boolean)
 	assert.Nil(t, cfg.Struct)
@@ -144,7 +144,7 @@ func TestExpandNilStructPointersHookFuncDefaultNotNilConfigNil(t *testing.T) {
 		Struct:    s1,
 		MapStruct: map[string]*Struct{"struct": s2},
 	}
-	assert.NoError(t, conf.UnmarshalExact(cfg))
+	assert.NoError(t, conf.Unmarshal(cfg))
 	assert.NotNil(t, cfg.Boolean)
 	assert.True(t, *cfg.Boolean)
 	assert.NotNil(t, cfg.Struct)
@@ -152,6 +152,15 @@ func TestExpandNilStructPointersHookFuncDefaultNotNilConfigNil(t *testing.T) {
 	assert.NotNil(t, cfg.MapStruct)
 	// TODO: Investigate this unexpected result.
 	assert.Equal(t, &Struct{}, cfg.MapStruct["struct"])
+}
+
+func TestUnmarshalWithErrorUnused(t *testing.T) {
+	stringMap := map[string]interface{}{
+		"boolean": true,
+		"string":  "this is a string",
+	}
+	conf := NewFromStringMap(stringMap)
+	assert.Error(t, conf.Unmarshal(&TestIDConfig{}, WithErrorUnused()))
 }
 
 type TestConfig struct {
@@ -208,11 +217,6 @@ func TestMapKeyStringToMapKeyTextUnmarshalerHookFunc(t *testing.T) {
 	}
 	conf := NewFromStringMap(stringMap)
 
-	cfgExact := &TestIDConfig{}
-	assert.NoError(t, conf.UnmarshalExact(cfgExact))
-	assert.True(t, cfgExact.Boolean)
-	assert.Equal(t, map[TestID]string{"string": "this is a string"}, cfgExact.Map)
-
 	cfg := &TestIDConfig{}
 	assert.NoError(t, conf.Unmarshal(cfg))
 	assert.True(t, cfg.Boolean)
@@ -229,9 +233,6 @@ func TestMapKeyStringToMapKeyTextUnmarshalerHookFuncDuplicateID(t *testing.T) {
 	}
 	conf := NewFromStringMap(stringMap)
 
-	cfgExact := &TestIDConfig{}
-	assert.Error(t, conf.UnmarshalExact(cfgExact))
-
 	cfg := &TestIDConfig{}
 	assert.Error(t, conf.Unmarshal(cfg))
 }
@@ -244,9 +245,6 @@ func TestMapKeyStringToMapKeyTextUnmarshalerHookFuncErrorUnmarshal(t *testing.T)
 		},
 	}
 	conf := NewFromStringMap(stringMap)
-
-	cfgExact := &TestIDConfig{}
-	assert.Error(t, conf.UnmarshalExact(cfgExact))
 
 	cfg := &TestIDConfig{}
 	assert.Error(t, conf.Unmarshal(cfg))
@@ -321,12 +319,12 @@ func newConfFromFile(t testing.TB, fileName string) map[string]interface{} {
 }
 
 type testConfig struct {
-	Next    nextConfig `mapstructure:"next"`
-	Another string     `mapstructure:"another"`
+	Next    *nextConfig `mapstructure:"next"`
+	Another string      `mapstructure:"another"`
 }
 
 func (tc *testConfig) Unmarshal(component *Conf) error {
-	if err := component.UnmarshalExact(tc); err != nil {
+	if err := component.Unmarshal(tc); err != nil {
 		return err
 	}
 	tc.Another += " is only called directly"
@@ -334,11 +332,12 @@ func (tc *testConfig) Unmarshal(component *Conf) error {
 }
 
 type nextConfig struct {
-	String string `mapstructure:"string"`
+	String  string `mapstructure:"string"`
+	private string
 }
 
 func (nc *nextConfig) Unmarshal(component *Conf) error {
-	if err := component.UnmarshalExact(nc); err != nil {
+	if err := component.Unmarshal(nc); err != nil {
 		return err
 	}
 	nc.String += " is called"
@@ -357,11 +356,23 @@ func TestUnmarshaler(t *testing.T) {
 	assert.NoError(t, cfgMap.Unmarshal(tc))
 	assert.Equal(t, "make sure this", tc.Another)
 	assert.Equal(t, "make sure this is called", tc.Next.String)
+}
 
-	tce := &testConfig{}
-	assert.NoError(t, cfgMap.UnmarshalExact(tce))
-	assert.Equal(t, "make sure this", tce.Another)
-	assert.Equal(t, "make sure this is called", tce.Next.String)
+func TestUnmarshalerKeepAlreadyInitialized(t *testing.T) {
+	cfgMap := NewFromStringMap(map[string]interface{}{
+		"next": map[string]interface{}{
+			"string": "make sure this",
+		},
+		"another": "make sure this",
+	})
+
+	tc := &testConfig{Next: &nextConfig{
+		private: "keep already configured members",
+	}}
+	assert.NoError(t, cfgMap.Unmarshal(tc))
+	assert.Equal(t, "make sure this", tc.Another)
+	assert.Equal(t, "make sure this is called", tc.Next.String)
+	assert.Equal(t, "keep already configured members", tc.Next.private)
 }
 
 func TestDirectUnmarshaler(t *testing.T) {
@@ -372,10 +383,13 @@ func TestDirectUnmarshaler(t *testing.T) {
 		"another": "make sure this",
 	})
 
-	tc := &testConfig{}
+	tc := &testConfig{Next: &nextConfig{
+		private: "keep already configured members",
+	}}
 	assert.NoError(t, tc.Unmarshal(cfgMap))
 	assert.Equal(t, "make sure this is only called directly", tc.Another)
 	assert.Equal(t, "make sure this is called", tc.Next.String)
+	assert.Equal(t, "keep already configured members", tc.Next.private)
 }
 
 type testErrConfig struct {
@@ -383,7 +397,7 @@ type testErrConfig struct {
 }
 
 func (tc *testErrConfig) Unmarshal(component *Conf) error {
-	return component.UnmarshalExact(tc)
+	return component.Unmarshal(tc)
 }
 
 type errConfig struct {
@@ -405,9 +419,5 @@ func TestUnmarshalerErr(t *testing.T) {
 
 	tc := &testErrConfig{}
 	assert.EqualError(t, cfgMap.Unmarshal(tc), expectErr)
-	assert.Empty(t, tc.Err.Foo)
-
-	tce := &testErrConfig{}
-	assert.EqualError(t, cfgMap.UnmarshalExact(tce), expectErr)
 	assert.Empty(t, tc.Err.Foo)
 }

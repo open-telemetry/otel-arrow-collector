@@ -30,8 +30,6 @@ import (
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/eventlog"
 
-	"go.opentelemetry.io/collector/confmap"
-	"go.opentelemetry.io/collector/confmap/converter/overwritepropertiesconverter"
 	"go.opentelemetry.io/collector/featuregate"
 )
 
@@ -95,7 +93,8 @@ func (s *windowsService) start(elog *eventlog.Log, colErrorChannel chan error) e
 	if err := s.flags.Parse(os.Args[1:]); err != nil {
 		return err
 	}
-	if err := featuregate.GetRegistry().Apply(gatesList); err != nil {
+
+	if err := featuregate.GetRegistry().Apply(getFeatureGatesFlag(s.flags)); err != nil {
 		return err
 	}
 	var err error
@@ -150,12 +149,7 @@ func newWithWindowsEventLogCore(set CollectorSettings, flags *flag.FlagSet, elog
 			return nil, errors.New("at least one config flag must be provided")
 		}
 
-		cfgSet := newDefaultConfigProviderSettings(configFlags)
-		// Append the "overwrite properties converter" as the first converter.
-		cfgSet.ResolverSettings.Converters = append(
-			[]confmap.Converter{overwritepropertiesconverter.New(getSetFlag(flags))},
-			cfgSet.ResolverSettings.Converters...)
-		set.ConfigProvider, err = NewConfigProvider(cfgSet)
+		set.ConfigProvider, err = NewConfigProvider(newDefaultConfigProviderSettings(configFlags))
 		if err != nil {
 			return nil, err
 		}
