@@ -175,11 +175,15 @@ func (e *Exporter) runArrowStream(bgctx context.Context) {
 	// restarted.
 	stream.client = sc
 
+	// ww is used to wait for the writer.
 	var ww sync.WaitGroup
 
 	ww.Add(1)
 	e.wg.Add(1)
-	go stream.write(ctx, e, &ww)
+	go func() {
+		defer e.wg.Done()
+		stream.write(ctx, e, &ww)
+	}()
 
 	if err := stream.read(ctx); err != nil {
 		// TODO: should this log even an io.EOF error?

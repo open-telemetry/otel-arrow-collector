@@ -239,8 +239,12 @@ func (s *Stream) encode(records interface{}) (*arrowpb.BatchArrowRecords, error)
 	case plog.Logs:
 		// TODO e.g., batch, err = s.producer.BatchArrowRecordsFrom(data)
 		// after https://github.com/f5/otel-arrow-adapter/pull/13.
+		return nil, fmt.Errorf("unsupported OTLP type: logs")
 	case pmetric.Metrics:
 		// TODO: This will follow.
+		return nil, fmt.Errorf("unsupported OTLP type: metrics")
+	default:
+		return nil, fmt.Errorf("unsupported OTLP type: %T", records)
 	}
 	return batch, err
 }
