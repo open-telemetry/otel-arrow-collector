@@ -16,6 +16,8 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"path/filepath"
 	"testing"
 
@@ -25,9 +27,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config"
-	"go.opentelemetry.io/collector/confmap/confmaptest"
 	"go.opentelemetry.io/collector/featuregate"
-	"go.opentelemetry.io/collector/service/internal/configunmarshaler"
 )
 
 func TestService_GetFactory(t *testing.T) {
@@ -92,11 +92,123 @@ func TestServiceGetExporters(t *testing.T) {
 	assert.Contains(t, expMap[config.LogsDataType], config.NewComponentID("nop"))
 }
 
+// TestServiceTelemetryCleanupOnError tests that if newService errors due to an invalid config telemetry is cleaned up
+// and another service with a valid config can be started right after.
+func TestServiceTelemetryCleanupOnError(t *testing.T) {
+	factories, err := componenttest.NopFactories()
+	require.NoError(t, err)
+
+	// Read invalid yaml config from file
+	invalidProvider, err := NewConfigProvider(newDefaultConfigProviderSettings([]string{filepath.Join("testdata", "otelcol-invalid.yaml")}))
+	require.NoError(t, err)
+	invalidCfg, err := invalidProvider.Get(context.Background(), factories)
+	require.NoError(t, err)
+
+	// Read valid yaml config from file
+	validProvider, err := NewConfigProvider(newDefaultConfigProviderSettings([]string{filepath.Join("testdata", "otelcol-nop.yaml")}))
+	require.NoError(t, err)
+	validCfg, err := validProvider.Get(context.Background(), factories)
+	require.NoError(t, err)
+
+	// Create a service with an invalid config and expect an error
+	telemetryOne := newColTelemetry(featuregate.NewRegistry())
+	_, err = newService(&settings{
+		BuildInfo: component.NewDefaultBuildInfo(),
+		Factories: factories,
+		Config:    invalidCfg,
+		telemetry: telemetryOne,
+	})
+	require.Error(t, err)
+
+	// Create a service with a valid config and expect no error
+	telemetryTwo := newColTelemetry(featuregate.NewRegistry())
+	srv, err := newService(&settings{
+		BuildInfo: component.NewDefaultBuildInfo(),
+		Factories: factories,
+		Config:    validCfg,
+		telemetry: telemetryTwo,
+	})
+	require.NoError(t, err)
+
+	// For safety ensure everything is cleaned up
+	t.Cleanup(func() {
+		assert.NoError(t, telemetryOne.shutdown())
+		assert.NoError(t, telemetryTwo.shutdown())
+		assert.NoError(t, srv.Shutdown(context.Background()))
+	})
+
+}
+
+// TestServiceTelemetryReusable tests that a single telemetryInitializer can be reused in multiple services
+func TestServiceTelemetryReusable(t *testing.T) {
+	factories, err := componenttest.NopFactories()
+	require.NoError(t, err)
+
+	// Read valid yaml config from file
+	validProvider, err := NewConfigProvider(newDefaultConfigProviderSettings([]string{filepath.Join("testdata", "otelcol-nop.yaml")}))
+	require.NoError(t, err)
+	validCfg, err := validProvider.Get(context.Background(), factories)
+	require.NoError(t, err)
+
+	// Create a service
+	telemetry := newColTelemetry(featuregate.NewRegistry())
+	// For safety ensure everything is cleaned up
+	t.Cleanup(func() {
+		assert.NoError(t, telemetry.shutdown())
+	})
+
+	srvOne, err := newService(&settings{
+		BuildInfo: component.NewDefaultBuildInfo(),
+		Factories: factories,
+		Config:    validCfg,
+		telemetry: telemetry,
+	})
+	require.NoError(t, err)
+
+	// URL of the telemetry service metrics endpoint
+	telemetryURL := fmt.Sprintf("http://%s/metrics", telemetry.server.Addr)
+
+	// Start the service
+	require.NoError(t, srvOne.Start(context.Background()))
+
+	// check telemetry server to ensure we get a response
+	var resp *http.Response
+
+	// #nosec G107
+	resp, err = http.Get(telemetryURL)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Shutdown the service
+	require.NoError(t, srvOne.Shutdown(context.Background()))
+
+	// Create a new service with the same telemetry
+	srvTwo, err := newService(&settings{
+		BuildInfo: component.NewDefaultBuildInfo(),
+		Factories: factories,
+		Config:    validCfg,
+		telemetry: telemetry,
+	})
+	require.NoError(t, err)
+
+	// Start the new service
+	require.NoError(t, srvTwo.Start(context.Background()))
+
+	// check telemetry server to ensure we get a response
+	// #nosec G107
+	resp, err = http.Get(telemetryURL)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Shutdown the new service
+	require.NoError(t, srvTwo.Shutdown(context.Background()))
+}
+
 func createExampleService(t *testing.T, factories component.Factories) *service {
 	// Read yaml config from file
-	conf, err := confmaptest.LoadConf(filepath.Join("testdata", "otelcol-nop.yaml"))
+	prov, err := NewConfigProvider(newDefaultConfigProviderSettings([]string{filepath.Join("testdata", "otelcol-nop.yaml")}))
 	require.NoError(t, err)
-	cfg, err := configunmarshaler.New().Unmarshal(conf, factories)
+	cfg, err := prov.Get(context.Background(), factories)
 	require.NoError(t, err)
 
 	telemetry := newColTelemetry(featuregate.NewRegistry())

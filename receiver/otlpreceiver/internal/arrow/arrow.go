@@ -20,7 +20,6 @@ import (
 
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
 	batchEvent "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
-	"github.com/f5/otel-arrow-adapter/pkg/otel/traces"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config"
@@ -53,12 +52,6 @@ type Receiver struct {
 	arrowConsumer *batchEvent.Consumer
 }
 
-type allProducers struct {
-	Traces *traces.OtlpProducer
-	// TODO: Logs
-	// TODO: Metrics
-}
-
 // New creates a new Receiver reference.
 func New(
 	id config.ComponentID,
@@ -79,7 +72,6 @@ func New(
 
 func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStreamServer) error {
 	ctx := serverStream.Context()
-	producers := r.newProducers()
 
 	for {
 		// See if the context has been canceled.
@@ -95,13 +87,8 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStre
 			return err
 		}
 
-		// Convert to records:
-		records, err := r.arrowConsumer.Consume(req)
-		if err != nil {
-			return err
-		}
 		// Process records:
-		err = r.processRecords(ctx, records, producers)
+		err = r.processRecords(ctx, req)
 		if err != nil {
 			return err
 		}
@@ -127,41 +114,35 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStre
 	}
 }
 
-func (r *Receiver) processRecords(ctx context.Context, records []*batchEvent.RecordMessage, producers allProducers) error {
-	for _, msg := range records {
-		switch msg.PayloadType() {
-		case arrowpb.OtlpArrowPayloadType_METRICS:
-			return ErrNoMetricsConsumer
-		case arrowpb.OtlpArrowPayloadType_LOGS:
-			return ErrNoLogsConsumer
-		case arrowpb.OtlpArrowPayloadType_SPANS:
-			if producers.Traces == nil {
-				return ErrNoTracesConsumer
-			}
-			// TODO: Use the obsreport object to instrument (somehow)
-			otlp, err := producers.Traces.ProduceFrom(msg.Record())
+func (r *Receiver) processRecords(ctx context.Context, records *arrowpb.BatchArrowRecords) error {
+	payloads := records.GetOtlpArrowPayloads()
+	if len(payloads) == 0 {
+		return nil
+	}
+	// TODO: Uncertainty about why Type is per-payload but
+	// consumer API is single-type. Should the consumer API accept
+	// arrow.Record?
+	switch payloads[0].Type {
+	case arrowpb.OtlpArrowPayloadType_METRICS:
+		return ErrNoMetricsConsumer
+	case arrowpb.OtlpArrowPayloadType_LOGS:
+		return ErrNoLogsConsumer
+	case arrowpb.OtlpArrowPayloadType_SPANS:
+		// TODO: Use the obsreport object to instrument (somehow)
+
+		otlp, err := r.arrowConsumer.TracesFrom(records)
+		if err != nil {
+			return err
+		}
+		for _, traces := range otlp {
+			err = r.Traces().ConsumeTraces(ctx, traces)
 			if err != nil {
 				return err
 			}
-			for _, traces := range otlp {
-				err = r.Traces().ConsumeTraces(ctx, traces)
-				if err != nil {
-					return err
-				}
-			}
-
-		default:
-			return ErrUnrecognizedPayload
 		}
+
+	default:
+		return ErrUnrecognizedPayload
 	}
 	return nil
-}
-
-func (r *Receiver) newProducers() (p allProducers) {
-	if r.Traces() != nil {
-		p.Traces = traces.NewOtlpProducer()
-	}
-	// TODO: Logs
-	// TODO: Metrics
-	return
 }

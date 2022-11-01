@@ -15,6 +15,7 @@
 package internal // import "go.opentelemetry.io/collector/pdata/internal/cmd/pdatagen/internal"
 
 var resourceFile = &File{
+	Path:        "pdata",
 	Name:        "resource",
 	PackageName: "pcommon",
 	imports: []string{
@@ -44,7 +45,6 @@ var resource = &messageValueStruct{
 }
 
 var resourceField = &messageValueField{
-	fieldName:       "Resource",
-	originFieldName: "Resource",
-	returnMessage:   resource,
+	fieldName:     "Resource",
+	returnMessage: resource,
 }

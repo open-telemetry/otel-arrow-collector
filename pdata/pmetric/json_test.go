@@ -38,11 +38,11 @@ var metricsOTLP = func() Metrics {
 var metricsJSON = `{"resourceMetrics":[{"resource":{"attributes":[{"key":"host.name","value":{"stringValue":"testHost"}}]},"scopeMetrics":[{"scope":{"name":"name","version":"version"},"metrics":[{"name":"testMetric"}]}]}]}`
 
 func TestMetricsJSON(t *testing.T) {
-	encoder := NewJSONMarshaler()
+	encoder := &JSONMarshaler{}
 	jsonBuf, err := encoder.MarshalMetrics(metricsOTLP)
 	assert.NoError(t, err)
 
-	decoder := NewJSONUnmarshaler()
+	decoder := &JSONUnmarshaler{}
 	var got interface{}
 	got, err = decoder.UnmarshalMetrics(jsonBuf)
 	assert.NoError(t, err)
@@ -51,7 +51,7 @@ func TestMetricsJSON(t *testing.T) {
 }
 
 func TestMetricsJSON_Marshal(t *testing.T) {
-	encoder := NewJSONMarshaler()
+	encoder := &JSONMarshaler{}
 	jsonBuf, err := encoder.MarshalMetrics(metricsOTLP)
 	assert.NoError(t, err)
 	assert.Equal(t, metricsJSON, string(jsonBuf))
@@ -77,7 +77,7 @@ var metricsSumOTLPFull = func() Metrics {
 	sumMetric.SetDescription("test sum")
 	sumMetric.SetUnit("unit")
 	sum := sumMetric.SetEmptySum()
-	sum.SetAggregationTemporality(MetricAggregationTemporalityCumulative)
+	sum.SetAggregationTemporality(AggregationTemporalityCumulative)
 	sum.SetIsMonotonic(true)
 	datapoint := sum.DataPoints().AppendEmpty()
 	datapoint.SetStartTimestamp(pcommon.NewTimestampFromTime(time.Now()))
@@ -157,7 +157,7 @@ var metricsHistogramOTLPFull = func() Metrics {
 	histogramMetric.SetDescription("test Histogram")
 	histogramMetric.SetUnit("unit")
 	histogram := histogramMetric.SetEmptyHistogram()
-	histogram.SetAggregationTemporality(MetricAggregationTemporalityCumulative)
+	histogram.SetAggregationTemporality(AggregationTemporalityCumulative)
 	datapoint := histogram.DataPoints().AppendEmpty()
 	datapoint.SetStartTimestamp(pcommon.NewTimestampFromTime(time.Now()))
 	datapoint.Attributes().PutStr("string", "value")
@@ -202,7 +202,7 @@ var metricsExponentialHistogramOTLPFull = func() Metrics {
 	histogramMetric.SetDescription("test ExponentialHistogram")
 	histogramMetric.SetUnit("unit")
 	histogram := histogramMetric.SetEmptyExponentialHistogram()
-	histogram.SetAggregationTemporality(MetricAggregationTemporalityCumulative)
+	histogram.SetAggregationTemporality(AggregationTemporalityCumulative)
 	datapoint := histogram.DataPoints().AppendEmpty()
 	datapoint.SetScale(1)
 	datapoint.SetStartTimestamp(pcommon.NewTimestampFromTime(time.Now()))
@@ -306,21 +306,25 @@ func Test_jsonUnmarshaler_UnmarshalMetrics(t *testing.T) {
 			},
 		},
 	}
+	oldDelegate := delegate
+	t.Cleanup(func() {
+		delegate = oldDelegate
+	})
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			for _, opEnumsAsInts := range []bool{true, false} {
 				for _, opEmitDefaults := range []bool{true, false} {
 					for _, opOrigName := range []bool{true, false} {
-						marshaller := &jsonMarshaler{
-							delegate: jsonpb.Marshaler{
-								EnumsAsInts:  opEnumsAsInts,
-								EmitDefaults: opEmitDefaults,
-								OrigName:     opOrigName,
-							}}
+						delegate = &jsonpb.Marshaler{
+							EnumsAsInts:  opEnumsAsInts,
+							EmitDefaults: opEmitDefaults,
+							OrigName:     opOrigName,
+						}
+						encoder := &JSONMarshaler{}
 						m := tt.args.md()
-						jsonBuf, err := marshaller.MarshalMetrics(m)
+						jsonBuf, err := encoder.MarshalMetrics(m)
 						assert.NoError(t, err)
-						decoder := NewJSONUnmarshaler()
+						decoder := JSONUnmarshaler{}
 						got, err := decoder.UnmarshalMetrics(jsonBuf)
 						assert.NoError(t, err)
 						assert.EqualValues(t, m, got)

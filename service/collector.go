@@ -31,7 +31,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/extension/ballastextension"
 	"go.opentelemetry.io/collector/featuregate"
-	"go.opentelemetry.io/collector/service/internal/telemetrylogs"
+	"go.opentelemetry.io/collector/service/internal/grpclog"
 )
 
 // State defines Collector's state.
@@ -132,6 +132,10 @@ func (col *Collector) setupConfigurationComponents(ctx context.Context) error {
 		return fmt.Errorf("failed to get config: %w", err)
 	}
 
+	if err = cfg.Validate(); err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
+	}
+
 	col.service, err = newService(&settings{
 		BuildInfo:         col.set.BuildInfo,
 		Factories:         col.set.Factories,
@@ -145,11 +149,11 @@ func (col *Collector) setupConfigurationComponents(ctx context.Context) error {
 	}
 
 	if !col.set.SkipSettingGRPCLogger {
-		telemetrylogs.SetColGRPCLogger(col.service.telemetrySettings.Logger, cfg.Service.Telemetry.Logs.Level)
+		grpclog.SetLogger(col.service.telemetrySettings.Logger, cfg.Service.Telemetry.Logs.Level)
 	}
 
 	if err = col.service.Start(ctx); err != nil {
-		return err
+		return multierr.Append(err, col.shutdownServiceAndTelemetry(ctx))
 	}
 	col.setCollectorState(Running)
 	return nil
@@ -215,17 +219,28 @@ func (col *Collector) shutdown(ctx context.Context) error {
 		errs = multierr.Append(errs, fmt.Errorf("failed to shutdown config provider: %w", err))
 	}
 
-	if err := col.service.Shutdown(ctx); err != nil {
-		errs = multierr.Append(errs, fmt.Errorf("failed to shutdown service: %w", err))
-	}
-
-	// TODO: Move this as part of the service shutdown.
-	if err := col.service.telemetryInitializer.shutdown(); err != nil {
-		errs = multierr.Append(errs, fmt.Errorf("failed to shutdown collector telemetry: %w", err))
-	}
+	errs = multierr.Append(errs, col.shutdownServiceAndTelemetry(ctx))
 
 	col.setCollectorState(Closed)
 
+	return errs
+}
+
+// shutdownServiceAndTelemetry bundles shutting down the service and telemetryInitializer.
+// Returned error will be in multierr form and wrapped.
+func (col *Collector) shutdownServiceAndTelemetry(ctx context.Context) error {
+	var errs error
+
+	// shutdown service
+	if err := col.service.Shutdown(ctx); err != nil {
+		errs = multierr.Append(errs, fmt.Errorf("failed to shutdown service after error: %w", err))
+	}
+
+	// TODO: Move this as part of the service shutdown.
+	// shutdown telemetryInitializer
+	if err := col.service.telemetryInitializer.shutdown(); err != nil {
+		errs = multierr.Append(errs, fmt.Errorf("failed to shutdown collector telemetry: %w", err))
+	}
 	return errs
 }
 

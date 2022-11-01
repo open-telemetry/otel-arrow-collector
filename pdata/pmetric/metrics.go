@@ -37,12 +37,12 @@ func NewMetrics() Metrics {
 	return newMetrics(&otlpcollectormetrics.ExportMetricsServiceRequest{})
 }
 
-// CopyTo copies all metrics from ms to dest.
+// CopyTo copies the Metrics instance overriding the destination.
 func (ms Metrics) CopyTo(dest Metrics) {
 	ms.ResourceMetrics().CopyTo(dest.ResourceMetrics())
 }
 
-// MoveTo moves all properties from the current struct to dest
+// MoveTo moves the Metrics instance overriding the destination and
 // resetting the current instance to its zero value.
 func (ms Metrics) MoveTo(dest Metrics) {
 	*dest.getOrig() = *ms.getOrig()
@@ -102,7 +102,8 @@ func (ms Metrics) DataPointCount() (dataPointCount int) {
 type MetricType int32
 
 const (
-	MetricTypeNone MetricType = iota
+	// MetricTypeEmpty means that metric type is unset.
+	MetricTypeEmpty MetricType = iota
 	MetricTypeGauge
 	MetricTypeSum
 	MetricTypeHistogram
@@ -113,8 +114,8 @@ const (
 // String returns the string representation of the MetricType.
 func (mdt MetricType) String() string {
 	switch mdt {
-	case MetricTypeNone:
-		return "None"
+	case MetricTypeEmpty:
+		return "Empty"
 	case MetricTypeGauge:
 		return "Gauge"
 	case MetricTypeSum:
@@ -129,27 +130,27 @@ func (mdt MetricType) String() string {
 	return ""
 }
 
-// MetricAggregationTemporality defines how a metric aggregator reports aggregated values.
+// AggregationTemporality defines how a metric aggregator reports aggregated values.
 // It describes how those values relate to the time interval over which they are aggregated.
-type MetricAggregationTemporality int32
+type AggregationTemporality int32
 
 const (
-	// MetricAggregationTemporalityUnspecified is the default MetricAggregationTemporality, it MUST NOT be used.
-	MetricAggregationTemporalityUnspecified = MetricAggregationTemporality(otlpmetrics.AggregationTemporality_AGGREGATION_TEMPORALITY_UNSPECIFIED)
-	// MetricAggregationTemporalityDelta is a MetricAggregationTemporality for a metric aggregator which reports changes since last report time.
-	MetricAggregationTemporalityDelta = MetricAggregationTemporality(otlpmetrics.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA)
-	// MetricAggregationTemporalityCumulative is a MetricAggregationTemporality for a metric aggregator which reports changes since a fixed start time.
-	MetricAggregationTemporalityCumulative = MetricAggregationTemporality(otlpmetrics.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE)
+	// AggregationTemporalityUnspecified is the default AggregationTemporality, it MUST NOT be used.
+	AggregationTemporalityUnspecified = AggregationTemporality(otlpmetrics.AggregationTemporality_AGGREGATION_TEMPORALITY_UNSPECIFIED)
+	// AggregationTemporalityDelta is a AggregationTemporality for a metric aggregator which reports changes since last report time.
+	AggregationTemporalityDelta = AggregationTemporality(otlpmetrics.AggregationTemporality_AGGREGATION_TEMPORALITY_DELTA)
+	// AggregationTemporalityCumulative is a AggregationTemporality for a metric aggregator which reports changes since a fixed start time.
+	AggregationTemporalityCumulative = AggregationTemporality(otlpmetrics.AggregationTemporality_AGGREGATION_TEMPORALITY_CUMULATIVE)
 )
 
-// String returns the string representation of the MetricAggregationTemporality.
-func (at MetricAggregationTemporality) String() string {
+// String returns the string representation of the AggregationTemporality.
+func (at AggregationTemporality) String() string {
 	switch at {
-	case MetricAggregationTemporalityUnspecified:
+	case AggregationTemporalityUnspecified:
 		return "Unspecified"
-	case MetricAggregationTemporalityDelta:
+	case AggregationTemporalityDelta:
 		return "Delta"
-	case MetricAggregationTemporalityCumulative:
+	case AggregationTemporalityCumulative:
 		return "Cumulative"
 	}
 	return ""
@@ -159,7 +160,8 @@ func (at MetricAggregationTemporality) String() string {
 type NumberDataPointValueType int32
 
 const (
-	NumberDataPointValueTypeNone NumberDataPointValueType = iota
+	// NumberDataPointValueTypeEmpty means that data point value is unset.
+	NumberDataPointValueTypeEmpty NumberDataPointValueType = iota
 	NumberDataPointValueTypeInt
 	NumberDataPointValueTypeDouble
 )
@@ -167,8 +169,8 @@ const (
 // String returns the string representation of the NumberDataPointValueType.
 func (nt NumberDataPointValueType) String() string {
 	switch nt {
-	case NumberDataPointValueTypeNone:
-		return "None"
+	case NumberDataPointValueTypeEmpty:
+		return "Empty"
 	case NumberDataPointValueTypeInt:
 		return "Int"
 	case NumberDataPointValueTypeDouble:
@@ -181,7 +183,8 @@ func (nt NumberDataPointValueType) String() string {
 type ExemplarValueType int32
 
 const (
-	ExemplarValueTypeNone ExemplarValueType = iota
+	// ExemplarValueTypeEmpty means that exemplar value is unset.
+	ExemplarValueTypeEmpty ExemplarValueType = iota
 	ExemplarValueTypeInt
 	ExemplarValueTypeDouble
 )
@@ -189,8 +192,8 @@ const (
 // String returns the string representation of the ExemplarValueType.
 func (nt ExemplarValueType) String() string {
 	switch nt {
-	case ExemplarValueTypeNone:
-		return "None"
+	case ExemplarValueTypeEmpty:
+		return "Empty"
 	case ExemplarValueTypeInt:
 		return "Int"
 	case ExemplarValueTypeDouble:
