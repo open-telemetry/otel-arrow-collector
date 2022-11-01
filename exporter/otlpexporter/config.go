@@ -20,6 +20,7 @@ import (
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
+	"go.opentelemetry.io/collector/exporter/otlpexporter/internal/arrow"
 )
 
 // Config defines configuration for OpenCensus exporter.
@@ -31,13 +32,7 @@ type Config struct {
 
 	configgrpc.GRPCClientSettings `mapstructure:",squash"` // squash ensures fields are correctly decoded in embedded struct.
 
-	Arrow *ArrowSettings `mapstructure:"arrow"`
-}
-
-// ArrowSettings
-type ArrowSettings struct {
-	Enabled    bool `mapstructure:"enabled"`
-	NumStreams int  `mapstructure:"num_streams"`
+	Arrow *arrow.Settings `mapstructure:"arrow"`
 }
 
 var _ config.Exporter = (*Config)(nil)
@@ -49,14 +44,6 @@ func (cfg *Config) Validate() error {
 	}
 	if err := cfg.Arrow.Validate(); err != nil {
 		return fmt.Errorf("arrow settings has invalid configuration: %w", err)
-	}
-
-	return nil
-}
-
-func (cfg *ArrowSettings) Validate() error {
-	if cfg.NumStreams < 1 {
-		return fmt.Errorf("stream count should be > 0: %d", cfg.NumStreams)
 	}
 
 	return nil

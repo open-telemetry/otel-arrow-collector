@@ -1,17 +1,31 @@
+// Copyright  The OpenTelemetry Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package arrow
 
 import (
 	"context"
 	"fmt"
 
+	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
+	batchEvent "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
+	"github.com/f5/otel-arrow-adapter/pkg/otel/traces"
+
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/obsreport"
-
-	arrowpb "github.com/lquerel/otel-arrow-adapter/api/collector/arrow/v1"
-	batchEvent "github.com/lquerel/otel-arrow-adapter/pkg/otel/batch_event"
-	"github.com/lquerel/otel-arrow-adapter/pkg/otel/traces"
 )
 
 const (
@@ -33,13 +47,13 @@ type Consumers interface {
 
 type Receiver struct {
 	Consumers
-	arrowpb.UnimplementedEventsServiceServer
+	arrowpb.UnimplementedArrowStreamServiceServer
 
 	obsrecv       *obsreport.Receiver
 	arrowConsumer *batchEvent.Consumer
 }
 
-type producers struct {
+type allProducers struct {
 	Traces *traces.OtlpProducer
 	// TODO: Logs
 	// TODO: Metrics
@@ -63,7 +77,7 @@ func New(
 	}
 }
 
-func (r *Receiver) EventsStream(serverStream arrowpb.EventsService_EventStreamServer) error {
+func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStreamServer) error {
 	ctx := serverStream.Context()
 	producers := r.newProducers()
 
@@ -106,11 +120,14 @@ func (r *Receiver) EventsStream(serverStream arrowpb.EventsService_EventStreamSe
 		}
 		resp.Statuses = append(resp.Statuses, status)
 
-		serverStream.Send(resp)
+		err = serverStream.Send(resp)
+		if err != nil {
+			return err
+		}
 	}
 }
 
-func (r *Receiver) processRecords(ctx context.Context, records []*batchEvent.RecordMessage, producers producers) error {
+func (r *Receiver) processRecords(ctx context.Context, records []*batchEvent.RecordMessage, producers allProducers) error {
 	for _, msg := range records {
 		switch msg.PayloadType() {
 		case arrowpb.OtlpArrowPayloadType_METRICS:
@@ -140,7 +157,7 @@ func (r *Receiver) processRecords(ctx context.Context, records []*batchEvent.Rec
 	return nil
 }
 
-func (r *Receiver) newProducers() (p producers) {
+func (r *Receiver) newProducers() (p allProducers) {
 	if r.Traces() != nil {
 		p.Traces = traces.NewOtlpProducer()
 	}
