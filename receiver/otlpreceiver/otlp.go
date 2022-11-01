@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"sync"
 
+	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -36,8 +37,6 @@ import (
 	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/logs"
 	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/metrics"
 	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/trace"
-
-	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
 )
 
 // otlpReceiver is the type that exposes Trace and Metrics reception.
