@@ -28,7 +28,7 @@ type streamPrioritizer struct {
 }
 
 // newStreamPrioritizer constructs a channel-based first-available prioritizer.
-func newStreamPrioritizer(settings *Settings) streamPrioritizer {
+func newStreamPrioritizer(settings Settings) streamPrioritizer {
 	return streamPrioritizer{
 		make(chan *Stream, settings.NumStreams),
 	}

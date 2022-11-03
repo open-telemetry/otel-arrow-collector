@@ -224,22 +224,25 @@ func (s *Stream) SendAndWait(ctx context.Context, records interface{}) error {
 }
 
 // encode produces the next batch of Arrow records.
-func (s *Stream) encode(records interface{}) (*arrowpb.BatchArrowRecords, error) {
+func (s *Stream) encode(records interface{}) (_ *arrowpb.BatchArrowRecords, retErr error) {
 	// Note!! This is a placeholder.  After this PR merges the
 	// code base will be upgraded to the latest version of
 	// github.com/f5/otel-arrow-adapter, which returns one
 	// BatchArrowRecords per pdata Logs/Metrics/Traces.  The TODO below
 	// will be addressed, i.e., we will not drop all but one
 	// batch.
+	defer func() {
+		if err := recover(); err != nil {
+			retErr = fmt.Errorf("panic in otel-arrow-adapter: %v", err)
+		}
+	}()
 	var batch *arrowpb.BatchArrowRecords
 	var err error
 	switch data := records.(type) {
 	case ptrace.Traces:
-		batch, err = s.producer.BatchArrowRecordsFrom(data)
+		batch, err = s.producer.BatchArrowRecordsFromTraces(data)
 	case plog.Logs:
-		// TODO e.g., batch, err = s.producer.BatchArrowRecordsFrom(data)
-		// after https://github.com/f5/otel-arrow-adapter/pull/13.
-		return nil, fmt.Errorf("unsupported OTLP type: logs")
+		batch, err = s.producer.BatchArrowRecordsFromLogs(data)
 	case pmetric.Metrics:
 		// TODO: This will follow.
 		return nil, fmt.Errorf("unsupported OTLP type: metrics")

@@ -35,17 +35,17 @@ import (
 // functionality.
 type Exporter struct {
 	// settings contains Arrow-specific parameters.
-	settings *Settings
+	settings Settings
 
 	// telemetry includes logger, tracer, meter.
 	telemetry component.TelemetrySettings
 
+	// client uses the exporter's gRPC ClientConn (or is a mock, in tests).
+	client arrowpb.ArrowStreamServiceClient
+
 	// grpcOptions includes options used by the unary RPC methods,
 	// e.g., WaitForReady.
 	grpcOptions []grpc.CallOption
-
-	// client is created from the exporter's gRPC ClientConn.
-	client arrowpb.ArrowStreamServiceClient
 
 	// ready prioritizes streams that are ready to send
 	ready streamPrioritizer
@@ -72,15 +72,20 @@ type Exporter struct {
 }
 
 // NewExporter configures a new Exporter.
-func NewExporter(settings *Settings, telemetry component.TelemetrySettings, clientConn *grpc.ClientConn, grpcOptions []grpc.CallOption) *Exporter {
+func NewExporter(
+	settings Settings,
+	telemetry component.TelemetrySettings,
+	client arrowpb.ArrowStreamServiceClient,
+	grpcOptions []grpc.CallOption,
+) *Exporter {
 	return &Exporter{
 		settings:    settings,
 		telemetry:   telemetry,
+		client:      client,
 		grpcOptions: grpcOptions,
-		client:      arrowpb.NewArrowStreamServiceClient(clientConn),
 		ready:       newStreamPrioritizer(settings),
 		returning:   make(chan *Stream, settings.NumStreams),
-		cancel:      func() {},
+		cancel:      nil,
 	}
 }
 

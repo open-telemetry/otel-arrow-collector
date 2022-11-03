@@ -21,6 +21,7 @@ import (
 	"runtime"
 	"time"
 
+	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
 	"go.uber.org/multierr"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
@@ -110,7 +111,7 @@ func (e *exporter) start(ctx context.Context, host component.Host) error {
 	if e.config.Arrow != nil && e.config.Arrow.Enabled {
 		ctx := e.enhanceContext(context.Background())
 
-		e.arrow = arrow.NewExporter(e.config.Arrow, e.settings.TelemetrySettings, e.clientConn, e.callOptions)
+		e.arrow = arrow.NewExporter(*e.config.Arrow, e.settings.TelemetrySettings, arrowpb.NewArrowStreamServiceClient(e.clientConn), e.callOptions)
 
 		if err := e.arrow.Start(ctx); err != nil {
 			return err
