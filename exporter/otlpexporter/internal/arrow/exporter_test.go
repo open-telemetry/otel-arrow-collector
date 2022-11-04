@@ -19,14 +19,22 @@ import (
 	"google.golang.org/grpc"
 )
 
+// TODO: More tests requested in PR12
+// The following two tests would be interesting to add:
+// Case of an invalid Arrow Record
+// Case of a very large protobuf message whose objective would be to
+// crash the collector (maybe this test is already done at the
+// collector level in a more general way).
+
 var (
 	waitForReadyOption = []grpc.CallOption{
 		grpc.WaitForReady(true),
 	}
 
-	nowaitForReadyOption = []grpc.CallOption{
-		grpc.WaitForReady(true),
-	}
+	// TODO: Test this
+	// nowaitForReadyOption = []grpc.CallOption{
+	// 	grpc.WaitForReady(false),
+	// }
 
 	singleStreamSettings = Settings{
 		Enabled:    true,
