@@ -99,19 +99,27 @@ func (tc *exporterTestCase) newStream(ctx context.Context) *exporterTestStream {
 	return testStream
 }
 
-func (tc *exporterTestCase) returnNewStream(h testChannel) func(context.Context, ...grpc.CallOption) (
+// returnNewStream applies the list of test channels in order to
+// construct new streams.  The final entry is re-used for new streams
+// when it is reached.
+func (tc *exporterTestCase) returnNewStream(hs ...testChannel) func(context.Context, ...grpc.CallOption) (
 	arrowpb.ArrowStreamService_ArrowStreamClient,
 	error,
 ) {
+	var pos int
 	return func(ctx context.Context, _ ...grpc.CallOption) (
 		arrowpb.ArrowStreamService_ArrowStreamClient,
 		error,
 	) {
+		h := hs[pos]
+		if pos < len(hs) {
+			pos++
+		}
 		if err := h.onConnect(ctx); err != nil {
 			return nil, err
 		}
 		str := tc.newStream(ctx)
-		str.sendCall.Times(1).DoAndReturn(h.onSend(ctx))
+		str.sendCall.AnyTimes().DoAndReturn(h.onSend(ctx))
 		str.recvCall.AnyTimes().DoAndReturn(h.onRecv(ctx))
 		return str.client, nil
 	}
@@ -202,6 +210,10 @@ func (tc *unresponsiveTestChannel) onRecv(ctx context.Context) func() (*arrowpb.
 			return &arrowpb.BatchStatus{}, ctx.Err()
 		}
 	}
+}
+
+func (tc *unresponsiveTestChannel) unblock() {
+	close(tc.ch)
 }
 
 // unsupportedTestChannel does not accept the connection.
@@ -313,6 +325,8 @@ func TestArrowExporterDowngrade(t *testing.T) {
 	require.Nil(t, stream)
 	require.NoError(t, err)
 
+	// TODO: test the logger was used to report "downgrading"
+
 	require.NoError(t, tc.exporter.Shutdown(bg))
 }
 
@@ -336,6 +350,41 @@ func TestArrowExporterConnectTimeout(t *testing.T) {
 	require.Nil(t, stream)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, context.Canceled))
+
+	require.NoError(t, tc.exporter.Shutdown(bg))
+}
+
+// TestArrowExporterStreamFailure tests that a single stream failure
+// followed by a healthy stream.
+func TestArrowExporterStreamFailure(t *testing.T) {
+	tc := newExporterTestCase(t, singleStreamSettings)
+	channel0 := newUnresponsiveTestChannel()
+	channel1 := newHealthyTestChannel(1)
+
+	tc.streamCall.AnyTimes().DoAndReturn(tc.returnNewStream(channel0, channel1))
+
+	bg := context.Background()
+	require.NoError(t, tc.exporter.Start(bg))
+
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		channel0.unblock()
+	}()
+
+	for times := 0; times < 2; times++ {
+		stream, err := tc.exporter.GetStream(bg)
+		require.NotNil(t, stream)
+		require.NoError(t, err)
+
+		err = stream.SendAndWait(bg, twoTraces)
+
+		if times == 0 {
+			require.Error(t, err)
+			require.True(t, errors.Is(err, ErrStreamRestarting))
+		} else {
+			require.NoError(t, err)
+		}
+	}
 
 	require.NoError(t, tc.exporter.Shutdown(bg))
 }

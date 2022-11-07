@@ -48,7 +48,7 @@ type Exporter struct {
 	grpcOptions []grpc.CallOption
 
 	// ready prioritizes streams that are ready to send
-	ready streamPrioritizer
+	ready *streamPrioritizer
 
 	// returning is used to pass broken, gracefully-terminated,
 	// and otherwise to the stream controller.
@@ -83,8 +83,8 @@ func NewExporter(
 		telemetry:   telemetry,
 		client:      client,
 		grpcOptions: grpcOptions,
-		ready:       newStreamPrioritizer(settings),
 		returning:   make(chan *Stream, settings.NumStreams),
+		ready:       nil,
 		cancel:      nil,
 	}
 }
@@ -96,6 +96,8 @@ func (e *Exporter) Start(ctx context.Context) error {
 
 	e.cancel = cancel
 	e.wg.Add(1)
+	e.ready = newStreamPrioritizer(ctx, e.settings)
+
 	go e.runStreamController(ctx)
 
 	return nil

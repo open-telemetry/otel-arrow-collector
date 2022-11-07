@@ -15,22 +15,30 @@
 package arrow
 
 import (
+	"context"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
+var ErrStreamRestarting = status.Error(codes.Aborted, "stream is restarting")
+
 // streamPrioritizer is a placeholder for a configurable mechanism
 // that selects the next stream to write.
 type streamPrioritizer struct {
+	// done corresponds with the background context Done channel..
+	done <-chan struct{}
+
 	// channel will be closed to downgrade to standard OTLP,
 	// otherwise it returns the first-available.
 	channel chan *Stream
 }
 
 // newStreamPrioritizer constructs a channel-based first-available prioritizer.
-func newStreamPrioritizer(settings Settings) streamPrioritizer {
-	return streamPrioritizer{
-		make(chan *Stream, settings.NumStreams),
+func newStreamPrioritizer(bgctx context.Context, settings Settings) *streamPrioritizer {
+	return &streamPrioritizer{
+		done:    bgctx.Done(),
+		channel: make(chan *Stream, settings.NumStreams),
 	}
 }
 
@@ -62,15 +70,21 @@ func (sp *streamPrioritizer) removeReady(stream *Stream) {
 	for {
 		// Searching for this stream to get it out of the ready queue.
 		select {
+		case <-sp.done:
+			// Shutdown case
+			return
 		case alternate := <-sp.channel:
 			if alternate == stream {
+				// Success: removed from ready queue.
 				return
 			}
 			sp.channel <- alternate
 		case wri := <-stream.toWrite:
-			// A consumer got us first.  Note: exporterhelper will retry.
+			// A consumer got us first, means this stream has been removed
+			// from the ready queue.  Note: exporterhelper will retry.
 			// TODO: Would it be better to handle retry in this directly?
-			wri.errCh <- status.Error(codes.Aborted, "stream is restarting")
+			wri.errCh <- ErrStreamRestarting
+			return
 		}
 	}
 }
