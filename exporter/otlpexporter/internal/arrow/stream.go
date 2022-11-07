@@ -34,17 +34,17 @@ import (
 	"go.opentelemetry.io/collector/pdata/ptrace"
 )
 
-type arrowProducer interface {
+type ArrowProducer interface {
 	BatchArrowRecordsFromTraces(ptrace.Traces) (*arrowpb.BatchArrowRecords, error)
 	BatchArrowRecordsFromLogs(plog.Logs) (*arrowpb.BatchArrowRecords, error)
 }
 
-var _ arrowProducer = (*arrowRecord.Producer)(nil)
+var _ ArrowProducer = (*arrowRecord.Producer)(nil)
 
 // Stream is 1:1 with gRPC stream.
 type Stream struct {
 	// producer is exclusive to the holder of the stream.
-	producer arrowProducer
+	producer ArrowProducer
 
 	// prioritizer has a reference to the stream, this allows it to be severed.
 	prioritizer *streamPrioritizer
@@ -52,7 +52,9 @@ type Stream struct {
 	// telemetry are a copy of the exporter's telemetry settings
 	telemetry component.TelemetrySettings
 
-	// client uses the exporter's grpc.ClientConn.
+	// client uses the exporter's grpc.ClientConn.  this is
+	// initially nil only set when ArrowStream() calls meaning the
+	// endpoint recognizes OTLP+Arrow.
 	client arrowpb.ArrowStreamService_ArrowStreamClient
 
 	// toWrite is passes a batch from the sender to the stream writer, which
@@ -77,7 +79,7 @@ type writeItem struct {
 
 // newStream constructs a stream
 func newStream(
-	producer arrowProducer,
+	producer ArrowProducer,
 	prioritizer *streamPrioritizer,
 	telemetry component.TelemetrySettings,
 ) *Stream {
@@ -99,6 +101,8 @@ func (s *Stream) setBatchChannel(batchID string, errCh chan error) {
 	s.waiters[batchID] = errCh
 }
 
+// run blocks the calling goroutine while executing stream logic.  run
+// will return when the reader and writer are finished.  errors will be logged.
 func (s *Stream) run(bgctx context.Context, client arrowpb.ArrowStreamServiceClient, grpcOptions []grpc.CallOption) {
 	ctx, cancel := context.WithCancel(bgctx)
 	defer cancel()
@@ -113,6 +117,9 @@ func (s *Stream) run(bgctx context.Context, client arrowpb.ArrowStreamServiceCli
 		// channel will be closed.
 		s.telemetry.Logger.Error("cannot start event stream", zap.Error(err))
 		return
+	}
+	if sc == nil {
+		panic(fmt.Errorf("nil event stream"))
 	}
 	// Setting .client != nil indicates that the endpoint was valid,
 	// streaming may start.  When this stream finishes, it will be
@@ -180,6 +187,9 @@ func (s *Stream) write(ctx context.Context) {
 			wri.errCh <- consumererror.NewPermanent(err)
 			s.telemetry.Logger.Error("arrow encode", zap.Error(err))
 			return
+		}
+		if batch == nil {
+			panic("nil arrow records batch")
 		}
 
 		// Let the receiver knows what to look for.
