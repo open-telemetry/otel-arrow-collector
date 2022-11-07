@@ -24,8 +24,6 @@ import (
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer/consumererror"
@@ -118,9 +116,6 @@ func (s *Stream) run(bgctx context.Context, client arrowpb.ArrowStreamServiceCli
 		s.telemetry.Logger.Error("cannot start event stream", zap.Error(err))
 		return
 	}
-	if sc == nil {
-		panic(fmt.Errorf("nil event stream"))
-	}
 	// Setting .client != nil indicates that the endpoint was valid,
 	// streaming may start.  When this stream finishes, it will be
 	// restarted.
@@ -149,7 +144,7 @@ func (s *Stream) run(bgctx context.Context, client arrowpb.ArrowStreamServiceCli
 	for _, ch := range s.waiters {
 		// Note: exporterhelper will retry.
 		// TODO: Would it be better to handle retry in this directly?
-		ch <- status.Error(codes.Aborted, "stream is restarting")
+		ch <- ErrStreamRestarting
 	}
 }
 
@@ -187,9 +182,6 @@ func (s *Stream) write(ctx context.Context) {
 			wri.errCh <- consumererror.NewPermanent(err)
 			s.telemetry.Logger.Error("arrow encode", zap.Error(err))
 			return
-		}
-		if batch == nil {
-			panic("nil arrow records batch")
 		}
 
 		// Let the receiver knows what to look for.
@@ -238,7 +230,7 @@ func (s *Stream) getSenderChannels(statuses []*arrowpb.StatusMessage) ([]chan er
 		ch, ok := s.waiters[status.BatchId]
 		if !ok {
 			// Will break the stream.
-			err = multierr.Append(err, fmt.Errorf("duplicate stream response: %s", status.BatchId))
+			err = multierr.Append(err, fmt.Errorf("unrecognized batch ID: %s", status.BatchId))
 			continue
 		}
 		delete(s.waiters, status.BatchId)

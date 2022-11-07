@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
 	arrowRecordMock "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record/mock"
@@ -72,6 +73,7 @@ func newStreamTestCase(t *testing.T) *streamTestCase {
 	}
 }
 
+// start runs a test stream according to the behavior of testChannel.
 func (tc *streamTestCase) start(channel testChannel) func() {
 	tc.streamCall.Times(1).DoAndReturn(tc.connectTestStream(channel))
 
@@ -89,6 +91,7 @@ func (tc *streamTestCase) start(channel testChannel) func() {
 	}
 }
 
+// connectTestStream returns the stream under test from the common test's mock ArrowStream().
 func (tc *streamTestCase) connectTestStream(h testChannel) func(context.Context, ...grpc.CallOption) (
 	arrowpb.ArrowStreamService_ArrowStreamClient,
 	error,
@@ -106,6 +109,11 @@ func (tc *streamTestCase) connectTestStream(h testChannel) func(context.Context,
 	}
 }
 
+// get returns the stream via the prioritizer it is registered with.
+func (tc *streamTestCase) get() *Stream {
+	return <-tc.prioritizer.readyChannel()
+}
+
 // TestStreamEncodeError verifies that an encoder error in the sender
 // yields a permanent error.
 func TestStreamEncodeError(t *testing.T) {
@@ -117,32 +125,51 @@ func TestStreamEncodeError(t *testing.T) {
 	cleanup := tc.start(newHealthyTestChannel(1))
 	defer cleanup()
 
-	err := tc.stream.SendAndWait(tc.bgctx, twoTraces)
+	// sender should get a permanent testErr
+	err := (<-tc.prioritizer.readyChannel()).SendAndWait(tc.bgctx, twoTraces)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, testErr))
 	require.True(t, consumererror.IsPermanent(err))
 }
 
-// TestStreamUnknownBatchError verifies that the stream reader
-// handles a missing BatchID e.g., caused by duplicate response.
+// TestStreamUnknownBatchError verifies that the stream reader handles
+// a unknown BatchID.
 func TestStreamUnknownBatchError(t *testing.T) {
-	channel := newHealthyTestChannel(1)
 	tc := newStreamTestCase(t)
 
 	tc.fromTracesCall.Times(1).Return(oneBatch, nil)
-	tc.sendCall.AnyTimes().Return(nil)
-	tc.recvCall.AnyTimes().Return(&arrowpb.BatchStatus{
-		Statuses: []*arrowpb.StatusMessage{
-			{
-				BatchId:    "unknown",
-				StatusCode: arrowpb.StatusCode_OK,
-			},
-		},
-	}, nil)
 
+	channel := newUnknownBatchIDTestChannel()
 	cleanup := tc.start(channel)
 	defer cleanup()
 
-	err := tc.stream.SendAndWait(tc.bgctx, twoTraces)
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		channel.unblock()
+	}()
+	// sender should get ErrStreamRestarting
+	err := tc.get().SendAndWait(tc.bgctx, twoTraces)
 	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrStreamRestarting))
+}
+
+// TestStreamSendError verifies that the stream reader handles a
+// Send() error.
+func TestStreamSendError(t *testing.T) {
+	tc := newStreamTestCase(t)
+
+	tc.fromTracesCall.Times(1).Return(oneBatch, nil)
+
+	channel := newSendErrorTestChannel()
+	cleanup := tc.start(channel)
+	defer cleanup()
+
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		channel.unblock()
+	}()
+	// sender should get ErrStreamRestarting
+	err := tc.get().SendAndWait(tc.bgctx, twoTraces)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrStreamRestarting))
 }

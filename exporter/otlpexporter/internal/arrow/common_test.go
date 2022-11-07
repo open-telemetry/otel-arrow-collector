@@ -31,9 +31,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-// TODO: More tests requested in PR12
-// The following two tests would be interesting to add:
-// Case of an invalid Arrow Record
+// TODO: More tests requested in PR12:
 // Case of a very large protobuf message whose objective would be to
 // crash the collector (maybe this test is already done at the
 // collector level in a more general way).
@@ -279,5 +277,76 @@ func (tc *disconnectedTestChannel) onSend(ctx context.Context) func(*arrowpb.Bat
 func (tc *disconnectedTestChannel) onRecv(ctx context.Context) func() (*arrowpb.BatchStatus, error) {
 	return func() (*arrowpb.BatchStatus, error) {
 		panic("unreachable")
+	}
+}
+
+// unknownBatchIDTestChannel returns an unknown Batch ID
+type unknownBatchIDTestChannel struct {
+	release chan struct{}
+}
+
+func newUnknownBatchIDTestChannel() *unknownBatchIDTestChannel {
+	return &unknownBatchIDTestChannel{
+		release: make(chan struct{}),
+	}
+}
+
+func (tc *unknownBatchIDTestChannel) onConnect(ctx context.Context) error {
+	return nil
+}
+
+func (tc *unknownBatchIDTestChannel) onSend(ctx context.Context) func(*arrowpb.BatchArrowRecords) error {
+	return func(*arrowpb.BatchArrowRecords) error {
+		return nil
+	}
+}
+
+func (tc *unknownBatchIDTestChannel) unblock() {
+	close(tc.release)
+}
+
+func (tc *unknownBatchIDTestChannel) onRecv(ctx context.Context) func() (*arrowpb.BatchStatus, error) {
+	return func() (*arrowpb.BatchStatus, error) {
+		<-tc.release
+		return &arrowpb.BatchStatus{
+			Statuses: []*arrowpb.StatusMessage{
+				{
+					BatchId:    "unknown",
+					StatusCode: arrowpb.StatusCode_OK,
+				},
+			},
+		}, nil
+	}
+}
+
+// sendErrorTestChannel returns an error in Send()
+type sendErrorTestChannel struct {
+	release chan struct{}
+}
+
+func newSendErrorTestChannel() *sendErrorTestChannel {
+	return &sendErrorTestChannel{
+		release: make(chan struct{}),
+	}
+}
+
+func (tc *sendErrorTestChannel) onConnect(ctx context.Context) error {
+	return nil
+}
+
+func (tc *sendErrorTestChannel) onSend(ctx context.Context) func(*arrowpb.BatchArrowRecords) error {
+	return func(*arrowpb.BatchArrowRecords) error {
+		return io.EOF
+	}
+}
+
+func (tc *sendErrorTestChannel) unblock() {
+	close(tc.release)
+}
+
+func (tc *sendErrorTestChannel) onRecv(ctx context.Context) func() (*arrowpb.BatchStatus, error) {
+	return func() (*arrowpb.BatchStatus, error) {
+		<-tc.release
+		return &arrowpb.BatchStatus{}, io.EOF
 	}
 }
