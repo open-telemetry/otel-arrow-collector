@@ -153,12 +153,7 @@ func (e *Exporter) runStreamController(bgctx context.Context) {
 func (e *Exporter) runArrowStream(bgctx context.Context) {
 	ctx, cancel := context.WithCancel(bgctx)
 
-	stream := &Stream{
-		toWrite:  make(chan writeItem, 1),
-		producer: arrowRecord.NewProducer(),
-		waiters:  map[string]chan error{},
-		cancel:   cancel,
-	}
+	stream := newStream(arrowRecord.NewProducer(), cancel)
 
 	defer func() {
 		e.wg.Done()

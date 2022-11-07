@@ -30,6 +30,13 @@ import (
 	"go.opentelemetry.io/collector/pdata/ptrace"
 )
 
+type arrowProducer interface {
+	BatchArrowRecordsFromTraces(ptrace.Traces) (*arrowpb.BatchArrowRecords, error)
+	BatchArrowRecordsFromLogs(plog.Logs) (*arrowpb.BatchArrowRecords, error)
+}
+
+var _ arrowProducer = (*arrowRecord.Producer)(nil)
+
 // Stream is 1:1 with gRPC stream.
 type Stream struct {
 	// client uses the exporter's grpc.ClientConn.
@@ -40,7 +47,7 @@ type Stream struct {
 	toWrite chan writeItem
 
 	// producer is exclusive to the holder of the stream.
-	producer *arrowRecord.Producer
+	producer arrowProducer
 
 	// cancel cancels the stream context.
 	cancel context.CancelFunc
@@ -59,6 +66,16 @@ type writeItem struct {
 	records interface{}
 	// errCh is used by the stream reader to unblock the sender
 	errCh chan error
+}
+
+// newStream constructs a stream
+func newStream(producer arrowProducer, cancel context.CancelFunc) *Stream {
+	return &Stream{
+		toWrite:  make(chan writeItem, 1),
+		producer: producer,
+		cancel:   cancel,
+		waiters:  map[string]chan error{},
+	}
 }
 
 // setBatchChannel places a waiting consumer's batchID into the waiters map, where
@@ -225,12 +242,7 @@ func (s *Stream) SendAndWait(ctx context.Context, records interface{}) error {
 
 // encode produces the next batch of Arrow records.
 func (s *Stream) encode(records interface{}) (_ *arrowpb.BatchArrowRecords, retErr error) {
-	// Note!! This is a placeholder.  After this PR merges the
-	// code base will be upgraded to the latest version of
-	// github.com/f5/otel-arrow-adapter, which returns one
-	// BatchArrowRecords per pdata Logs/Metrics/Traces.  The TODO below
-	// will be addressed, i.e., we will not drop all but one
-	// batch.
+	// Defensively, protect against panics in the Arrow producer function.
 	defer func() {
 		if err := recover(); err != nil {
 			retErr = fmt.Errorf("panic in otel-arrow-adapter: %v", err)
