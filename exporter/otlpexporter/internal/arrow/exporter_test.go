@@ -117,8 +117,7 @@ func (tc *exporterTestCase) returnNewStream(h testChannel) func(context.Context,
 	}
 }
 
-// healthy
-
+// healthyTestChannel accepts the connection and returns an OK status immediately.
 type healthyTestChannel struct {
 	ch chan *arrowpb.BatchArrowRecords
 }
@@ -167,8 +166,8 @@ func (tc *healthyTestChannel) onRecv(ctx context.Context) func() (*arrowpb.Batch
 	}
 }
 
-// unresponsive
-
+// unresponsiveTestChannel accepts the connection and receives data,
+// but never responds with status OK.
 type unresponsiveTestChannel struct {
 	ch chan struct{}
 }
@@ -205,8 +204,8 @@ func (tc *unresponsiveTestChannel) onRecv(ctx context.Context) func() (*arrowpb.
 	}
 }
 
-// unsupported
-
+// unsupportedTestChannel does not accept the connection.
+// TODO: Make this match the behavior of the gRPC server for an unrecognized request.
 type arrowUnsupportedTestChannel struct {
 }
 
@@ -230,25 +229,18 @@ func (tc *arrowUnsupportedTestChannel) onRecv(ctx context.Context) func() (*arro
 	}
 }
 
-// disconnected
-
+// disconnectedTestChannel allows the connection to time out.
 type disconnectedTestChannel struct {
 	ch chan struct{}
 }
 
 func newDisconnectedTestChannel() *disconnectedTestChannel {
-	return &disconnectedTestChannel{
-		ch: make(chan struct{}),
-	}
+	return &disconnectedTestChannel{}
 }
 
 func (tc *disconnectedTestChannel) onConnect(ctx context.Context) error {
-	select {
-	case <-tc.ch:
-		return fmt.Errorf("do not connect")
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	<-ctx.Done()
+	return ctx.Err()
 }
 
 func (tc *disconnectedTestChannel) onSend(ctx context.Context) func(*arrowpb.BatchArrowRecords) error {
