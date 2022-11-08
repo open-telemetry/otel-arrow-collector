@@ -20,10 +20,7 @@ import (
 
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
 	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"go.opentelemetry.io/collector/component"
 )
@@ -35,20 +32,20 @@ import (
 // functionality.
 type Exporter struct {
 	// settings contains Arrow-specific parameters.
-	settings *Settings
+	settings Settings
 
 	// telemetry includes logger, tracer, meter.
 	telemetry component.TelemetrySettings
+
+	// client uses the exporter's gRPC ClientConn (or is a mock, in tests).
+	client arrowpb.ArrowStreamServiceClient
 
 	// grpcOptions includes options used by the unary RPC methods,
 	// e.g., WaitForReady.
 	grpcOptions []grpc.CallOption
 
-	// client is created from the exporter's gRPC ClientConn.
-	client arrowpb.ArrowStreamServiceClient
-
 	// ready prioritizes streams that are ready to send
-	ready streamPrioritizer
+	ready *streamPrioritizer
 
 	// returning is used to pass broken, gracefully-terminated,
 	// and otherwise to the stream controller.
@@ -72,15 +69,20 @@ type Exporter struct {
 }
 
 // NewExporter configures a new Exporter.
-func NewExporter(settings *Settings, telemetry component.TelemetrySettings, clientConn *grpc.ClientConn, grpcOptions []grpc.CallOption) *Exporter {
+func NewExporter(
+	settings Settings,
+	telemetry component.TelemetrySettings,
+	client arrowpb.ArrowStreamServiceClient,
+	grpcOptions []grpc.CallOption,
+) *Exporter {
 	return &Exporter{
 		settings:    settings,
 		telemetry:   telemetry,
+		client:      client,
 		grpcOptions: grpcOptions,
-		client:      arrowpb.NewArrowStreamServiceClient(clientConn),
-		ready:       newStreamPrioritizer(settings),
 		returning:   make(chan *Stream, settings.NumStreams),
-		cancel:      func() {},
+		ready:       nil,
+		cancel:      nil,
 	}
 }
 
@@ -91,6 +93,8 @@ func (e *Exporter) Start(ctx context.Context) error {
 
 	e.cancel = cancel
 	e.wg.Add(1)
+	e.ready = newStreamPrioritizer(ctx, e.settings)
+
 	go e.runStreamController(ctx)
 
 	return nil
@@ -143,63 +147,15 @@ func (e *Exporter) runStreamController(bgctx context.Context) {
 // If the stream connection is successful, this goroutine starts another goroutine
 // to call writeStream() and performs readStream() itself.  When the stream shuts
 // down this call synchronously waits for and unblocks the consumers.
-func (e *Exporter) runArrowStream(bgctx context.Context) {
-	ctx, cancel := context.WithCancel(bgctx)
-
-	stream := &Stream{
-		toWrite:  make(chan writeItem, 1),
-		producer: arrowRecord.NewProducer(),
-		waiters:  map[string]chan error{},
-		cancel:   cancel,
-	}
+func (e *Exporter) runArrowStream(ctx context.Context) {
+	stream := newStream(arrowRecord.NewProducer(), e.ready, e.telemetry)
 
 	defer func() {
 		e.wg.Done()
-		cancel()
 		e.returning <- stream
 	}()
 
-	sc, err := e.client.ArrowStream(ctx, e.grpcOptions...)
-	if err != nil {
-		// TODO: only when this is a permanent (e.g., "no such
-		// method") error, downgrade to standard OTLP.
-		// Returning with stream.client == nil signals the
-		// lack of an Arrow stream endpoint.  When all the
-		// streams return with .client == nil, the ready
-		// channel will be closed.
-		e.telemetry.Logger.Error("cannot start event stream", zap.Error(err))
-		return
-	}
-	// Setting .client != nil indicates that the endpoint was valid,
-	// streaming may start.  When this stream finishes, it will be
-	// restarted.
-	stream.client = sc
-
-	// ww is used to wait for the writer.
-	var ww sync.WaitGroup
-
-	ww.Add(1)
-	e.wg.Add(1)
-	go func() {
-		defer e.wg.Done()
-		stream.write(ctx, e, &ww)
-	}()
-
-	if err := stream.read(ctx); err != nil {
-		// TODO: should this log even an io.EOF error?
-		e.telemetry.Logger.Error("arrow recv", zap.Error(err))
-	}
-
-	// Wait for the writer to ensure that all waiters are known.
-	ww.Wait()
-
-	// The reader and writer have both finished; respond to any
-	// outstanding waiters.
-	for _, ch := range stream.waiters {
-		// Note: exporterhelper will retry.
-		// TODO: Would it be better to handle retry in this directly?
-		ch <- status.Error(codes.Aborted, "stream is restarting")
-	}
+	stream.run(ctx, e.client, e.grpcOptions)
 }
 
 // GetStream is called to get an available stream with the user's pipeline context.

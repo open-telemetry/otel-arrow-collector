@@ -23,27 +23,41 @@ import (
 	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
+	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 )
 
+type ArrowProducer interface {
+	BatchArrowRecordsFromTraces(ptrace.Traces) (*arrowpb.BatchArrowRecords, error)
+	BatchArrowRecordsFromLogs(plog.Logs) (*arrowpb.BatchArrowRecords, error)
+}
+
+var _ ArrowProducer = (*arrowRecord.Producer)(nil)
+
 // Stream is 1:1 with gRPC stream.
 type Stream struct {
-	// client uses the exporter's grpc.ClientConn.
+	// producer is exclusive to the holder of the stream.
+	producer ArrowProducer
+
+	// prioritizer has a reference to the stream, this allows it to be severed.
+	prioritizer *streamPrioritizer
+
+	// telemetry are a copy of the exporter's telemetry settings
+	telemetry component.TelemetrySettings
+
+	// client uses the exporter's grpc.ClientConn.  this is
+	// initially nil only set when ArrowStream() calls meaning the
+	// endpoint recognizes OTLP+Arrow.
 	client arrowpb.ArrowStreamService_ArrowStreamClient
 
 	// toWrite is passes a batch from the sender to the stream writer, which
 	// includes a dedicated channel for the response.
 	toWrite chan writeItem
-
-	// producer is exclusive to the holder of the stream.
-	producer *arrowRecord.Producer
-
-	// cancel cancels the stream context.
-	cancel context.CancelFunc
 
 	// lock protects waiters.
 	lock sync.Mutex
@@ -61,6 +75,21 @@ type writeItem struct {
 	errCh chan error
 }
 
+// newStream constructs a stream
+func newStream(
+	producer ArrowProducer,
+	prioritizer *streamPrioritizer,
+	telemetry component.TelemetrySettings,
+) *Stream {
+	return &Stream{
+		producer:    producer,
+		prioritizer: prioritizer,
+		telemetry:   telemetry,
+		toWrite:     make(chan writeItem, 1),
+		waiters:     map[string]chan error{},
+	}
+}
+
 // setBatchChannel places a waiting consumer's batchID into the waiters map, where
 // the stream reader may find it.
 func (s *Stream) setBatchChannel(batchID string, errCh chan error) {
@@ -70,17 +99,63 @@ func (s *Stream) setBatchChannel(batchID string, errCh chan error) {
 	s.waiters[batchID] = errCh
 }
 
+// run blocks the calling goroutine while executing stream logic.  run
+// will return when the reader and writer are finished.  errors will be logged.
+func (s *Stream) run(bgctx context.Context, client arrowpb.ArrowStreamServiceClient, grpcOptions []grpc.CallOption) {
+	ctx, cancel := context.WithCancel(bgctx)
+	defer cancel()
+
+	sc, err := client.ArrowStream(ctx, grpcOptions...)
+	if err != nil {
+		// TODO: only when this is a permanent (e.g., "no such
+		// method") error, downgrade to standard OTLP.
+		// Returning with stream.client == nil signals the
+		// lack of an Arrow stream endpoint.  When all the
+		// streams return with .client == nil, the ready
+		// channel will be closed.
+		s.telemetry.Logger.Error("cannot start event stream", zap.Error(err))
+		return
+	}
+	// Setting .client != nil indicates that the endpoint was valid,
+	// streaming may start.  When this stream finishes, it will be
+	// restarted.
+	s.client = sc
+
+	// ww is used to wait for the writer.  Since we wait for the writer,
+	// the writer's goroutine is not added to exporter waitgroup (e.wg).
+	var ww sync.WaitGroup
+
+	ww.Add(1)
+	go func() {
+		defer ww.Done()
+		defer cancel()
+		s.write(ctx)
+	}()
+
+	if err := s.read(ctx); err != nil {
+		s.telemetry.Logger.Error("arrow recv", zap.Error(err))
+	}
+	// Wait for the writer to ensure that all waiters are known.
+	cancel()
+	ww.Wait()
+
+	// The reader and writer have both finished; respond to any
+	// outstanding waiters.
+	for _, ch := range s.waiters {
+		// Note: exporterhelper will retry.
+		// TODO: Would it be better to handle retry in this directly?
+		ch <- ErrStreamRestarting
+	}
+}
+
 // write repeatedly places this stream into the next-available queue, then
 // performs a blocking send().  This returns when the data is in the write buffer,
 // the caller waiting on its error channel.
-func (s *Stream) write(ctx context.Context, e *Exporter, ww *sync.WaitGroup) {
-	defer ww.Done()
-	defer s.cancel()
-
+func (s *Stream) write(ctx context.Context) {
 	for {
 		// Note: this can't block b/c stream has capacity &
 		// individual streams shut down synchronously.
-		e.ready.setReady(s)
+		s.prioritizer.setReady(s)
 
 		// this can block, and if the context is canceled we
 		// wait for the reader to find this stream.
@@ -91,7 +166,7 @@ func (s *Stream) write(ctx context.Context, e *Exporter, ww *sync.WaitGroup) {
 			// Because we did not <-stream.toWrite, there
 			// is a potential sender race since the stream
 			// is currently in the ready set.
-			e.ready.removeReady(s)
+			s.prioritizer.removeReady(s)
 			return
 		}
 		// Note: For the two return statements below there is no potential
@@ -105,15 +180,16 @@ func (s *Stream) write(ctx context.Context, e *Exporter, ww *sync.WaitGroup) {
 			//
 			// This is some kind of internal error.
 			wri.errCh <- consumererror.NewPermanent(err)
-			e.telemetry.Logger.Error("arrow encode", zap.Error(err))
+			s.telemetry.Logger.Error("arrow encode", zap.Error(err))
 			return
 		}
 
+		// Let the receiver knows what to look for.
 		s.setBatchChannel(batch.BatchId, wri.errCh)
 
 		if err := s.client.Send(batch); err != nil {
 			// The error will be sent to errCh during cleanup for this stream.
-			e.telemetry.Logger.Error("arrow send", zap.Error(err))
+			s.telemetry.Logger.Error("arrow send", zap.Error(err))
 			return
 		}
 	}
@@ -125,8 +201,6 @@ func (s *Stream) read(_ context.Context) error {
 	// Note we do not use the context, the stream context might
 	// cancel a call to Recv() but the call to processBatchStatus
 	// is non-blocking.
-	defer s.cancel()
-
 	for {
 		resp, err := s.client.Recv()
 		if err != nil {
@@ -156,7 +230,7 @@ func (s *Stream) getSenderChannels(statuses []*arrowpb.StatusMessage) ([]chan er
 		ch, ok := s.waiters[status.BatchId]
 		if !ok {
 			// Will break the stream.
-			err = multierr.Append(err, fmt.Errorf("duplicate stream response: %s", status.BatchId))
+			err = multierr.Append(err, fmt.Errorf("unrecognized batch ID: %s", status.BatchId))
 			continue
 		}
 		delete(s.waiters, status.BatchId)
@@ -224,22 +298,20 @@ func (s *Stream) SendAndWait(ctx context.Context, records interface{}) error {
 }
 
 // encode produces the next batch of Arrow records.
-func (s *Stream) encode(records interface{}) (*arrowpb.BatchArrowRecords, error) {
-	// Note!! This is a placeholder.  After this PR merges the
-	// code base will be upgraded to the latest version of
-	// github.com/f5/otel-arrow-adapter, which returns one
-	// BatchArrowRecords per pdata Logs/Metrics/Traces.  The TODO below
-	// will be addressed, i.e., we will not drop all but one
-	// batch.
+func (s *Stream) encode(records interface{}) (_ *arrowpb.BatchArrowRecords, retErr error) {
+	// Defensively, protect against panics in the Arrow producer function.
+	defer func() {
+		if err := recover(); err != nil {
+			retErr = fmt.Errorf("panic in otel-arrow-adapter: %v", err)
+		}
+	}()
 	var batch *arrowpb.BatchArrowRecords
 	var err error
 	switch data := records.(type) {
 	case ptrace.Traces:
-		batch, err = s.producer.BatchArrowRecordsFrom(data)
+		batch, err = s.producer.BatchArrowRecordsFromTraces(data)
 	case plog.Logs:
-		// TODO e.g., batch, err = s.producer.BatchArrowRecordsFrom(data)
-		// after https://github.com/f5/otel-arrow-adapter/pull/13.
-		return nil, fmt.Errorf("unsupported OTLP type: logs")
+		batch, err = s.producer.BatchArrowRecordsFromLogs(data)
 	case pmetric.Metrics:
 		// TODO: This will follow.
 		return nil, fmt.Errorf("unsupported OTLP type: metrics")

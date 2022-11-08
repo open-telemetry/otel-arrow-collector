@@ -21,6 +21,8 @@ import (
 	"runtime"
 	"time"
 
+	arrowPkg "github.com/apache/arrow/go/v10/arrow"
+	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
 	"go.uber.org/multierr"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
@@ -74,12 +76,9 @@ func newExporter(cfg config.Exporter, settings component.ExporterCreateSettings)
 	userAgent := fmt.Sprintf("%s/%s (%s/%s)",
 		settings.BuildInfo.Description, settings.BuildInfo.Version, runtime.GOOS, runtime.GOARCH)
 
-	// TODO: this requires a future version of arrow relative to
-	// what otel-arrow-adapter uses:
-	// import arrowPkg "github.com/apache/arrow/go/v10/arrow"
-	// if oCfg.Arrow != nil && oCfg.Arrow.Enabled {
-	// 	userAgent += fmt.Sprint(" ApacheArrow/enabled (%s)", arrowPkg.PkgVersion)
-	// }
+	if oCfg.Arrow != nil && oCfg.Arrow.Enabled {
+		userAgent += fmt.Sprintf(" ApacheArrow/%s (NumStreams/%d)", arrowPkg.PkgVersion, oCfg.Arrow.NumStreams)
+	}
 
 	return &exporter{config: oCfg, settings: settings, userAgent: userAgent}, nil
 }
@@ -110,7 +109,7 @@ func (e *exporter) start(ctx context.Context, host component.Host) error {
 	if e.config.Arrow != nil && e.config.Arrow.Enabled {
 		ctx := e.enhanceContext(context.Background())
 
-		e.arrow = arrow.NewExporter(e.config.Arrow, e.settings.TelemetrySettings, e.clientConn, e.callOptions)
+		e.arrow = arrow.NewExporter(*e.config.Arrow, e.settings.TelemetrySettings, arrowpb.NewArrowStreamServiceClient(e.clientConn), e.callOptions)
 
 		if err := e.arrow.Start(ctx); err != nil {
 			return err
