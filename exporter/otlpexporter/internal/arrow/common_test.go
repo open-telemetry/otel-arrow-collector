@@ -24,11 +24,12 @@ import (
 	arrowCollectorMock "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1/mock"
 
 	"github.com/golang/mock/gomock"
+	"go.uber.org/zap/zaptest"
+	"google.golang.org/grpc"
+
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/internal/testdata"
-	"go.uber.org/zap/zaptest"
-	"google.golang.org/grpc"
 )
 
 // TODO: More tests requested in PR12:
