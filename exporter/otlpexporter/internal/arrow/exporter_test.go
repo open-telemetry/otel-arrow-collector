@@ -169,6 +169,8 @@ func TestArrowExporterStreamRace(t *testing.T) {
 
 	tc.streamCall.AnyTimes().DoAndReturn(tc.repeatedNewStream(func() testChannel {
 		tc := newUnresponsiveTestChannel()
+		// Immediately unblock to return the EOF to the stream
+		// receiver and shut down the stream.
 		go tc.unblock()
 		return tc
 	}))

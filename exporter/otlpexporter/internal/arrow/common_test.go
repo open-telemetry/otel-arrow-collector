@@ -151,6 +151,8 @@ func (ctc *commonTestCase) returnNewStream(hs ...testChannel) func(context.Conte
 	}
 }
 
+// repeatedNewStream returns a stream configured with a new test
+// channel on every ArrowStream() request.
 func (ctc *commonTestCase) repeatedNewStream(nc func() testChannel) func(context.Context, ...grpc.CallOption) (
 	arrowpb.ArrowStreamService_ArrowStreamClient,
 	error,
