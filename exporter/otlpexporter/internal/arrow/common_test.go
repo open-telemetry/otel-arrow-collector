@@ -52,6 +52,11 @@ var (
 		NumStreams: 1,
 	}
 
+	twoStreamsSettings = Settings{
+		Enabled:    true,
+		NumStreams: 2,
+	}
+
 	twoTraces = testdata.GenerateTraces(2)
 )
 
@@ -68,15 +73,22 @@ type commonTestCase struct {
 	streamCall    *gomock.Call
 }
 
-func newTestTelemetry(t *testing.T) component.TelemetrySettings {
+type noisyTest bool
+
+const Noisy noisyTest = true
+const NotNoisy noisyTest = false
+
+func newTestTelemetry(t *testing.T, noisy noisyTest) component.TelemetrySettings {
 	telset := componenttest.NewNopTelemetrySettings()
-	telset.Logger = zaptest.NewLogger(t)
+	if !noisy {
+		telset.Logger = zaptest.NewLogger(t)
+	}
 	return telset
 }
 
-func newCommonTestCase(t *testing.T) *commonTestCase {
+func newCommonTestCase(t *testing.T, noisy noisyTest) *commonTestCase {
 	ctrl := gomock.NewController(t)
-	telset := newTestTelemetry(t)
+	telset := newTestTelemetry(t, noisy)
 
 	client := arrowCollectorMock.NewMockArrowStreamServiceClient(ctrl)
 
@@ -129,6 +141,27 @@ func (ctc *commonTestCase) returnNewStream(hs ...testChannel) func(context.Conte
 		if pos < len(hs) {
 			pos++
 		}
+		if err := h.onConnect(ctx); err != nil {
+			return nil, err
+		}
+		str := ctc.newMockStream(ctx)
+		str.sendCall.AnyTimes().DoAndReturn(h.onSend(ctx))
+		str.recvCall.AnyTimes().DoAndReturn(h.onRecv(ctx))
+		return str.streamClient, nil
+	}
+}
+
+// repeatedNewStream returns a stream configured with a new test
+// channel on every ArrowStream() request.
+func (ctc *commonTestCase) repeatedNewStream(nc func() testChannel) func(context.Context, ...grpc.CallOption) (
+	arrowpb.ArrowStreamService_ArrowStreamClient,
+	error,
+) {
+	return func(ctx context.Context, opts ...grpc.CallOption) (
+		arrowpb.ArrowStreamService_ArrowStreamClient,
+		error,
+	) {
+		h := nc()
 		if err := h.onConnect(ctx); err != nil {
 			return nil, err
 		}

@@ -55,7 +55,7 @@ func newStreamTestCase(t *testing.T) *streamTestCase {
 	bg, cancel := context.WithCancel(context.Background())
 	prio := newStreamPrioritizer(bg, aset)
 
-	ctc := newCommonTestCase(t)
+	ctc := newCommonTestCase(t, NotNoisy)
 	cts := ctc.newMockStream(bg)
 
 	stream := newStream(producer, prio, ctc.telset)

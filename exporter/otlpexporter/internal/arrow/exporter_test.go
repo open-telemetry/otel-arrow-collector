@@ -28,8 +28,8 @@ type exporterTestCase struct {
 	exporter *Exporter
 }
 
-func newExporterTestCase(t *testing.T, arrowset Settings) *exporterTestCase {
-	ctc := newCommonTestCase(t)
+func newExporterTestCase(t *testing.T, noisy noisyTest, arrowset Settings) *exporterTestCase {
+	ctc := newCommonTestCase(t, noisy)
 	exp := NewExporter(arrowset, ctc.telset, ctc.serviceClient, waitForReadyOption)
 
 	return &exporterTestCase{
@@ -40,7 +40,7 @@ func newExporterTestCase(t *testing.T, arrowset Settings) *exporterTestCase {
 
 // TestArrowExporterSuccess tests a single Send through a healthy channel.
 func TestArrowExporterSuccess(t *testing.T) {
-	tc := newExporterTestCase(t, singleStreamSettings)
+	tc := newExporterTestCase(t, NotNoisy, singleStreamSettings)
 	channel := newHealthyTestChannel(1)
 
 	tc.streamCall.Times(1).DoAndReturn(tc.returnNewStream(channel))
@@ -58,7 +58,7 @@ func TestArrowExporterSuccess(t *testing.T) {
 
 // TestArrowExporterTimeout tests that single slow Send leads to context canceled.
 func TestArrowExporterTimeout(t *testing.T) {
-	tc := newExporterTestCase(t, singleStreamSettings)
+	tc := newExporterTestCase(t, NotNoisy, singleStreamSettings)
 	channel := newUnresponsiveTestChannel()
 
 	tc.streamCall.Times(1).DoAndReturn(tc.returnNewStream(channel))
@@ -84,7 +84,7 @@ func TestArrowExporterTimeout(t *testing.T) {
 // (TODO in a precisely appropriate way) the connection is downgraded
 // without error.
 func TestArrowExporterDowngrade(t *testing.T) {
-	tc := newExporterTestCase(t, singleStreamSettings)
+	tc := newExporterTestCase(t, NotNoisy, singleStreamSettings)
 	channel := newArrowUnsupportedTestChannel()
 
 	tc.streamCall.AnyTimes().DoAndReturn(tc.returnNewStream(channel))
@@ -104,7 +104,7 @@ func TestArrowExporterDowngrade(t *testing.T) {
 // TestArrowExporterConnectTimeout tests that an error is returned to
 // the caller if the response does not arrive in time.
 func TestArrowExporterConnectTimeout(t *testing.T) {
-	tc := newExporterTestCase(t, singleStreamSettings)
+	tc := newExporterTestCase(t, NotNoisy, singleStreamSettings)
 	channel := newDisconnectedTestChannel()
 
 	tc.streamCall.AnyTimes().DoAndReturn(tc.returnNewStream(channel))
@@ -128,7 +128,7 @@ func TestArrowExporterConnectTimeout(t *testing.T) {
 // TestArrowExporterStreamFailure tests that a single stream failure
 // followed by a healthy stream.
 func TestArrowExporterStreamFailure(t *testing.T) {
-	tc := newExporterTestCase(t, singleStreamSettings)
+	tc := newExporterTestCase(t, NotNoisy, singleStreamSettings)
 	channel0 := newUnresponsiveTestChannel()
 	channel1 := newHealthyTestChannel(1)
 
@@ -155,6 +155,38 @@ func TestArrowExporterStreamFailure(t *testing.T) {
 		} else {
 			require.NoError(t, err)
 		}
+	}
+
+	require.NoError(t, tc.exporter.Shutdown(bg))
+}
+
+// TestArrowExporterStreamRace reproduces the situation needed for a
+// race between stream send and stream cancel, causing it to fully
+// exercise the removeReady() code path.
+func TestArrowExporterStreamRace(t *testing.T) {
+	// Two streams ensures every possibility.
+	tc := newExporterTestCase(t, Noisy, twoStreamsSettings)
+
+	tc.streamCall.AnyTimes().DoAndReturn(tc.repeatedNewStream(func() testChannel {
+		tc := newUnresponsiveTestChannel()
+		// Immediately unblock to return the EOF to the stream
+		// receiver and shut down the stream.
+		go tc.unblock()
+		return tc
+	}))
+
+	bg := context.Background()
+	require.NoError(t, tc.exporter.Start(bg))
+
+	for tries := 0; tries < 1000; tries++ {
+		stream, err := tc.exporter.GetStream(bg)
+		require.NotNil(t, stream)
+		require.NoError(t, err)
+
+		err = stream.SendAndWait(bg, twoTraces)
+
+		require.Error(t, err)
+		require.True(t, errors.Is(err, ErrStreamRestarting))
 	}
 
 	require.NoError(t, tc.exporter.Shutdown(bg))
