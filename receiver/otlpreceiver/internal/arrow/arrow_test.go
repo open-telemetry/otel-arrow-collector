@@ -15,18 +15,17 @@
 package arrow
 
 import (
-	// 	"context"
-	// 	"testing"
-
 	"context"
 	"errors"
 	"io"
+	"sync"
 	"testing"
 
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
 	arrowCollectorMock "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1/mock"
 	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 	"github.com/golang/mock/gomock"
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
@@ -34,6 +33,8 @@ import (
 	"go.opentelemetry.io/collector/internal/testdata"
 	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/arrow/mock"
 	"go.uber.org/zap/zaptest"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/testing/protocmp"
 )
 
 type commonTestCase struct {
@@ -95,6 +96,8 @@ func TestReceiver(t *testing.T) {
 	recvCall := service.EXPECT().Recv().Times(0)
 
 	consumers := mock.NewMockConsumers(ctrl)
+	consumers.EXPECT().Traces().Times(1).
+	)
 
 	settings := component.ReceiverCreateSettings{
 		TelemetrySettings: newTestTelemetry(t, NotNoisy),
@@ -118,22 +121,25 @@ func TestReceiver(t *testing.T) {
 		streamErr <- rcvr.ArrowStream(service)
 	}()
 
-	td := testdata.GenerateTraces(1)
+	td := testdata.GenerateTraces(2)
 
 	prod := arrowRecord.NewProducer()
 	batch, err := prod.BatchArrowRecordsFromTraces(td)
 	require.NoError(t, err)
 
-	service.EXPECT().Send(gomock.Eq(
-		&arrowpb.BatchStatus{
-			Statuses: []*arrowpb.StatusMessage{
-				{
-					BatchId:    batch.BatchId,
-					StatusCode: arrowpb.StatusCode_OK,
-				},
-			},
-		},
-	)).Times(1).Return(nil)
+	var rlock sync.Mutex
+	var received []*arrowpb.BatchStatus
+	service.EXPECT().Send(gomock.Any()).Times(1).DoAndReturn(func(arg *arrowpb.BatchStatus) error {
+		rlock.Lock()
+		defer rlock.Unlock()
+		copy := &arrowpb.BatchStatus{}
+		data, err := proto.Marshal(arg)
+		require.NoError(t, err)
+		require.NoError(t, proto.Unmarshal(data, copy))
+
+		received = append(received, copy)
+		return nil
+	})
 
 	tc.put(batch, nil)
 
@@ -142,4 +148,15 @@ func TestReceiver(t *testing.T) {
 	err = <-streamErr
 	require.Error(t, err)
 	require.True(t, errors.Is(err, context.Canceled))
+
+	require.Equal(t, "", cmp.Diff(received, []*arrowpb.BatchStatus{
+		{
+			Statuses: []*arrowpb.StatusMessage{
+				{
+					BatchId:    batch.BatchId,
+					StatusCode: arrowpb.StatusCode_OK,
+				},
+			},
+		},
+	}, protocmp.Transform()))
 }

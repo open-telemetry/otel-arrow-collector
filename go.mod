@@ -102,3 +102,5 @@ retract (
 	v0.57.0 // Release failed, use v0.57.2
 	v0.32.0 // Contains incomplete metrics transition to proto 0.9.0, random components are not working.
 )
+
+replace github.com/f5/otel-arrow-adapter => ../otel-arrow-adapter

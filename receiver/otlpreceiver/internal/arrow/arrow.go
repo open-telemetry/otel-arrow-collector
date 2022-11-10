@@ -119,21 +119,29 @@ func (r *Receiver) processRecords(ctx context.Context, records *arrowpb.BatchArr
 	if len(payloads) == 0 {
 		return nil
 	}
-	// TODO: Uncertainty about why Type is per-payload but
-	// consumer API is single-type. Should the consumer API accept
-	// arrow.Record?
+	// TODO: Use the obsreport object to instrument (somehow)
 	switch payloads[0].Type {
 	case arrowpb.OtlpArrowPayloadType_METRICS:
 		return ErrNoMetricsConsumer
 	case arrowpb.OtlpArrowPayloadType_LOGS:
-		return ErrNoLogsConsumer
-	case arrowpb.OtlpArrowPayloadType_SPANS:
-		// TODO: Use the obsreport object to instrument (somehow)
+		otlp, err := r.arrowConsumer.LogsFrom(records)
+		if err != nil {
+			return err
+		}
 
+		for _, logs := range otlp {
+			err = r.Logs().ConsumeLogs(ctx, logs)
+			if err != nil {
+				return err
+			}
+		}
+
+	case arrowpb.OtlpArrowPayloadType_SPANS:
 		otlp, err := r.arrowConsumer.TracesFrom(records)
 		if err != nil {
 			return err
 		}
+
 		for _, traces := range otlp {
 			err = r.Traces().ConsumeTraces(ctx, traces)
 			if err != nil {
