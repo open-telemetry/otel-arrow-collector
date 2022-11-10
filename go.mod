@@ -5,10 +5,11 @@ go 1.18
 require (
 	contrib.go.opencensus.io/exporter/prometheus v0.4.2
 	github.com/cenkalti/backoff/v4 v4.1.3
-	github.com/f5/otel-arrow-adapter v0.0.0-20221109024504-cce0927ee2b8
+	github.com/f5/otel-arrow-adapter v0.0.0-20221110200813-21e13c89f0c7
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/mock v1.6.0
 	github.com/golang/snappy v0.0.4
+	github.com/google/go-cmp v0.5.9
 	github.com/google/uuid v1.3.0
 	github.com/klauspost/compress v1.15.11
 	github.com/knadh/koanf v1.4.4
@@ -102,5 +103,3 @@ retract (
 	v0.57.0 // Release failed, use v0.57.2
 	v0.32.0 // Contains incomplete metrics transition to proto 0.9.0, random components are not working.
 )
-
-replace github.com/f5/otel-arrow-adapter => ../otel-arrow-adapter

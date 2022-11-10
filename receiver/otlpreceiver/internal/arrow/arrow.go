@@ -122,7 +122,18 @@ func (r *Receiver) processRecords(ctx context.Context, records *arrowpb.BatchArr
 	// TODO: Use the obsreport object to instrument (somehow)
 	switch payloads[0].Type {
 	case arrowpb.OtlpArrowPayloadType_METRICS:
+		// otlp, err := r.arrowConsumer.MetricsFrom(records)
+		// if err != nil {
+		// 	return err
+		// }
+		// for _, logs := range otlp {
+		// 	err = r.Metrics().ConsumeMetrics(ctx, logs)
+		// 	if err != nil {
+		// 		return err
+		// 	}
+		// }
 		return ErrNoMetricsConsumer
+
 	case arrowpb.OtlpArrowPayloadType_LOGS:
 		otlp, err := r.arrowConsumer.LogsFrom(records)
 		if err != nil {

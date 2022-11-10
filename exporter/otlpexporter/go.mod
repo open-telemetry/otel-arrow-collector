@@ -66,5 +66,3 @@ replace go.opentelemetry.io/collector => ../../
 replace go.opentelemetry.io/collector/pdata => ../../pdata
 
 replace go.opentelemetry.io/collector/semconv => ../../semconv
-
-replace github.com/f5/otel-arrow-adapter => ../../../otel-arrow-adapter

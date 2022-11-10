@@ -26,11 +26,14 @@ import (
 	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 	"github.com/golang/mock/gomock"
 	"github.com/google/go-cmp/cmp"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config"
+	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/internal/testdata"
+	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/arrow/mock"
 	"go.uber.org/zap/zaptest"
 	"google.golang.org/protobuf/proto"
@@ -38,18 +41,44 @@ import (
 )
 
 type commonTestCase struct {
-	ctrl     *gomock.Controller
-	telset   component.TelemetrySettings
-	service  arrowpb.ArrowStreamServiceClient
+	ctrl      *gomock.Controller
+	telset    component.TelemetrySettings
+	consumers mockConsumers
+	stream    *arrowCollectorMock.MockArrowStreamService_ArrowStreamServer
+	producer  *arrowRecord.Producer
+
 	ctxCall  *gomock.Call
 	sendCall *gomock.Call
 	recvCall *gomock.Call
+}
+
+type testChannel struct {
+	ch chan recvResult
+
+	rlock      sync.Mutex
+	sentStatus []*arrowpb.BatchStatus
+	recvTraces []ptrace.Traces
 }
 
 type noisyTest bool
 
 const Noisy noisyTest = true
 const NotNoisy noisyTest = false
+
+type recvResult struct {
+	payload *arrowpb.BatchArrowRecords
+	err     error
+}
+
+type mockConsumers struct {
+	traces  *mock.MockTraces
+	logs    *mock.MockLogs
+	metrics *mock.MockMetrics
+
+	tracesCall  *gomock.Call
+	logsCall    *gomock.Call
+	metricsCall *gomock.Call
+}
 
 func newTestTelemetry(t *testing.T, noisy noisyTest) component.TelemetrySettings {
 	telset := componenttest.NewNopTelemetrySettings()
@@ -59,97 +88,149 @@ func newTestTelemetry(t *testing.T, noisy noisyTest) component.TelemetrySettings
 	return telset
 }
 
-type recvResult struct {
-	payload *arrowpb.BatchArrowRecords
-	err     error
-}
-
-type testChannel struct {
-	ch chan recvResult
-}
-
 func newTestChannel() *testChannel {
 	return &testChannel{
 		ch: make(chan recvResult),
 	}
 }
 
-func (tc *testChannel) put(payload *arrowpb.BatchArrowRecords, err error) {
+func (tc *testChannel) putBatch(payload *arrowpb.BatchArrowRecords, err error) {
 	tc.ch <- recvResult{
 		payload: payload,
 		err:     err,
 	}
 }
 
-func (tc *testChannel) get() (recvResult, bool) {
+func (tc *testChannel) getBatch() (*arrowpb.BatchArrowRecords, error) {
 	r, ok := <-tc.ch
-	return r, ok
+	if !ok {
+		return nil, io.EOF
+	}
+	return r.payload, r.err
 }
 
-func TestReceiver(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	ctrl := gomock.NewController(t)
-	service := arrowCollectorMock.NewMockArrowStreamService_ArrowStreamServer(ctrl)
-	service.EXPECT().Context().AnyTimes().Return(ctx)
-
-	recvCall := service.EXPECT().Recv().Times(0)
-
-	consumers := mock.NewMockConsumers(ctrl)
-	consumers.EXPECT().Traces().Times(1).
-	)
-
-	settings := component.ReceiverCreateSettings{
-		TelemetrySettings: newTestTelemetry(t, NotNoisy),
-		BuildInfo:         component.NewDefaultBuildInfo(),
+func (tc *testChannel) doAndReturnSentStatus(arg *arrowpb.BatchStatus) error {
+	tc.rlock.Lock()
+	defer tc.rlock.Unlock()
+	copy := &arrowpb.BatchStatus{}
+	data, err := proto.Marshal(arg)
+	if err != nil {
+		return err
 	}
-	rcvr := New(config.NewComponentID("arrowtest"), consumers, settings)
+	if err := proto.Unmarshal(data, copy); err != nil {
+		return err
+	}
 
-	tc := newTestChannel()
+	tc.sentStatus = append(tc.sentStatus, copy)
+	return nil
+}
 
-	recvCall.AnyTimes().DoAndReturn(func() (*arrowpb.BatchArrowRecords, error) {
-		res, ok := tc.get()
-		if !ok {
-			return nil, io.EOF
-		}
-		return res.payload, res.err
-	})
+func (tc *testChannel) doAndReturnConsumeTraces(ctx context.Context, traces ptrace.Traces) error {
+	tc.rlock.Lock()
+	defer tc.rlock.Unlock()
+	copy := ptrace.NewTraces()
+	traces.CopyTo(copy)
+	tc.recvTraces = append(tc.recvTraces, traces)
+	return nil
+}
 
+func newMockConsumers(ctrl *gomock.Controller) mockConsumers {
+	mc := mockConsumers{
+		traces:  mock.NewMockTraces(ctrl),
+		logs:    mock.NewMockLogs(ctrl),
+		metrics: mock.NewMockMetrics(ctrl),
+	}
+	mc.traces.EXPECT().Capabilities().Times(0)
+	mc.tracesCall = mc.traces.EXPECT().ConsumeTraces(
+		gomock.Any(),
+		gomock.Any(),
+	).Times(0)
+	mc.logs.EXPECT().Capabilities().Times(0)
+	mc.logsCall = mc.logs.EXPECT().ConsumeLogs(
+		gomock.Any(),
+		gomock.Any(),
+	).Times(0)
+	mc.metrics.EXPECT().Capabilities().Times(0)
+	mc.metricsCall = mc.metrics.EXPECT().ConsumeMetrics(
+		gomock.Any(),
+		gomock.Any(),
+	).Times(0)
+	return mc
+}
+
+func (m mockConsumers) Traces() consumer.Traces {
+	return m.traces
+}
+
+func (m mockConsumers) Logs() consumer.Logs {
+	return m.logs
+}
+func (m mockConsumers) Metrics() consumer.Metrics {
+	return m.metrics
+}
+
+var _ Consumers = mockConsumers{}
+
+func newCommonTestCase(t *testing.T, tc *testChannel, noisy noisyTest) (*commonTestCase, func() error) {
+	ctrl := gomock.NewController(t)
+	stream := arrowCollectorMock.NewMockArrowStreamService_ArrowStreamServer(ctrl)
+
+	ctc := &commonTestCase{
+		ctrl:      ctrl,
+		telset:    newTestTelemetry(t, noisy),
+		consumers: newMockConsumers(ctrl),
+		stream:    stream,
+		producer:  arrowRecord.NewProducer(),
+		ctxCall:   stream.EXPECT().Context().Times(0),
+		recvCall:  stream.EXPECT().Recv().Times(0),
+		sendCall:  stream.EXPECT().Send(gomock.Any()).Times(0),
+	}
 	streamErr := make(chan error)
 
+	ctx, cancel := context.WithCancel(context.Background())
+
+	ctc.ctxCall.AnyTimes().Return(ctx)
+	ctc.recvCall.AnyTimes().DoAndReturn(tc.getBatch)
+	ctc.sendCall.AnyTimes().DoAndReturn(tc.doAndReturnSentStatus)
+	ctc.consumers.tracesCall.AnyTimes().DoAndReturn(tc.doAndReturnConsumeTraces)
+
+	rcvr := New(
+		config.NewComponentID("arrowtest"),
+		ctc.consumers,
+		component.ReceiverCreateSettings{
+			TelemetrySettings: ctc.telset,
+			BuildInfo:         component.NewDefaultBuildInfo(),
+		})
+
 	go func() {
-		streamErr <- rcvr.ArrowStream(service)
+		streamErr <- rcvr.ArrowStream(ctc.stream)
 	}()
 
-	td := testdata.GenerateTraces(2)
+	return ctc, func() error {
+		cancel()
+		return <-streamErr
+	}
+}
 
-	prod := arrowRecord.NewProducer()
-	batch, err := prod.BatchArrowRecordsFromTraces(td)
+func TestReceiverTraces(t *testing.T) {
+	tc := newTestChannel()
+	ctc, stop := newCommonTestCase(t, tc, NotNoisy)
+
+	td := testdata.GenerateTraces(2)
+	batch, err := ctc.producer.BatchArrowRecordsFromTraces(td)
 	require.NoError(t, err)
 
-	var rlock sync.Mutex
-	var received []*arrowpb.BatchStatus
-	service.EXPECT().Send(gomock.Any()).Times(1).DoAndReturn(func(arg *arrowpb.BatchStatus) error {
-		rlock.Lock()
-		defer rlock.Unlock()
-		copy := &arrowpb.BatchStatus{}
-		data, err := proto.Marshal(arg)
-		require.NoError(t, err)
-		require.NoError(t, proto.Unmarshal(data, copy))
+	tc.putBatch(batch, nil)
 
-		received = append(received, copy)
-		return nil
-	})
-
-	tc.put(batch, nil)
-
-	cancel()
-
-	err = <-streamErr
+	err = stop()
 	require.Error(t, err)
 	require.True(t, errors.Is(err, context.Canceled))
 
-	require.Equal(t, "", cmp.Diff(received, []*arrowpb.BatchStatus{
+	// EqualValues works for the underlying gogo protos.
+	assert.EqualValues(t, tc.recvTraces, []ptrace.Traces{td})
+
+	// cmp.Diff works for new-style google protobuf protos.
+	require.Equal(t, "", cmp.Diff(tc.sentStatus, []*arrowpb.BatchStatus{
 		{
 			Statuses: []*arrowpb.StatusMessage{
 				{
