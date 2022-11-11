@@ -33,6 +33,7 @@ import (
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/internal/testdata"
+	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/arrow/mock"
 	"go.uber.org/zap/zaptest"
@@ -42,6 +43,7 @@ import (
 
 type commonTestCase struct {
 	ctrl      *gomock.Controller
+	cancel    context.CancelFunc
 	telset    component.TelemetrySettings
 	consumers mockConsumers
 	stream    *arrowCollectorMock.MockArrowStreamService_ArrowStreamServer
@@ -58,6 +60,7 @@ type testChannel struct {
 	rlock      sync.Mutex
 	sentStatus []*arrowpb.BatchStatus
 	recvTraces []ptrace.Traces
+	recvLogs   []plog.Logs
 }
 
 type noisyTest bool
@@ -109,29 +112,44 @@ func (tc *testChannel) getBatch() (*arrowpb.BatchArrowRecords, error) {
 	return r.payload, r.err
 }
 
-func (tc *testChannel) doAndReturnSentStatus(arg *arrowpb.BatchStatus) error {
-	tc.rlock.Lock()
-	defer tc.rlock.Unlock()
-	copy := &arrowpb.BatchStatus{}
-	data, err := proto.Marshal(arg)
-	if err != nil {
-		return err
-	}
-	if err := proto.Unmarshal(data, copy); err != nil {
-		return err
-	}
+func (tc *testChannel) doAndReturnSentStatus(normalReturn error) func(arg *arrowpb.BatchStatus) error {
+	return func(arg *arrowpb.BatchStatus) error {
+		tc.rlock.Lock()
+		defer tc.rlock.Unlock()
+		copy := &arrowpb.BatchStatus{}
+		data, err := proto.Marshal(arg)
+		if err != nil {
+			return err
+		}
+		if err := proto.Unmarshal(data, copy); err != nil {
+			return err
+		}
 
-	tc.sentStatus = append(tc.sentStatus, copy)
-	return nil
+		tc.sentStatus = append(tc.sentStatus, copy)
+		return normalReturn
+	}
 }
 
-func (tc *testChannel) doAndReturnConsumeTraces(ctx context.Context, traces ptrace.Traces) error {
-	tc.rlock.Lock()
-	defer tc.rlock.Unlock()
-	copy := ptrace.NewTraces()
-	traces.CopyTo(copy)
-	tc.recvTraces = append(tc.recvTraces, traces)
-	return nil
+func (tc *testChannel) doAndReturnConsumeTraces(normalReturn error) func(ctx context.Context, traces ptrace.Traces) error {
+	return func(ctx context.Context, traces ptrace.Traces) error {
+		tc.rlock.Lock()
+		defer tc.rlock.Unlock()
+		copy := ptrace.NewTraces()
+		traces.CopyTo(copy)
+		tc.recvTraces = append(tc.recvTraces, traces)
+		return normalReturn
+	}
+}
+
+func (tc *testChannel) doAndReturnConsumeLogs(normalReturn error) func(ctx context.Context, logs plog.Logs) error {
+	return func(ctx context.Context, logs plog.Logs) error {
+		tc.rlock.Lock()
+		defer tc.rlock.Unlock()
+		copy := plog.NewLogs()
+		logs.CopyTo(copy)
+		tc.recvLogs = append(tc.recvLogs, logs)
+		return normalReturn
+	}
 }
 
 func newMockConsumers(ctrl *gomock.Controller) mockConsumers {
@@ -171,12 +189,15 @@ func (m mockConsumers) Metrics() consumer.Metrics {
 
 var _ Consumers = mockConsumers{}
 
-func newCommonTestCase(t *testing.T, tc *testChannel, noisy noisyTest) (*commonTestCase, func() error) {
+func newCommonTestCase(t *testing.T, tc *testChannel, noisy noisyTest) *commonTestCase {
 	ctrl := gomock.NewController(t)
 	stream := arrowCollectorMock.NewMockArrowStreamService_ArrowStreamServer(ctrl)
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	ctc := &commonTestCase{
 		ctrl:      ctrl,
+		cancel:    cancel,
 		telset:    newTestTelemetry(t, noisy),
 		consumers: newMockConsumers(ctrl),
 		stream:    stream,
@@ -185,14 +206,26 @@ func newCommonTestCase(t *testing.T, tc *testChannel, noisy noisyTest) (*commonT
 		recvCall:  stream.EXPECT().Recv().Times(0),
 		sendCall:  stream.EXPECT().Send(gomock.Any()).Times(0),
 	}
-	streamErr := make(chan error)
-
-	ctx, cancel := context.WithCancel(context.Background())
 
 	ctc.ctxCall.AnyTimes().Return(ctx)
 	ctc.recvCall.AnyTimes().DoAndReturn(tc.getBatch)
-	ctc.sendCall.AnyTimes().DoAndReturn(tc.doAndReturnSentStatus)
-	ctc.consumers.tracesCall.AnyTimes().DoAndReturn(tc.doAndReturnConsumeTraces)
+
+	return ctc
+}
+
+func statusOKFor(batchID string) *arrowpb.BatchStatus {
+	return &arrowpb.BatchStatus{
+		Statuses: []*arrowpb.StatusMessage{
+			{
+				BatchId:    batchID,
+				StatusCode: arrowpb.StatusCode_OK,
+			},
+		},
+	}
+}
+
+func (ctc *commonTestCase) start() func() error {
+	streamErr := make(chan error)
 
 	rcvr := New(
 		config.NewComponentID("arrowtest"),
@@ -206,15 +239,20 @@ func newCommonTestCase(t *testing.T, tc *testChannel, noisy noisyTest) (*commonT
 		streamErr <- rcvr.ArrowStream(ctc.stream)
 	}()
 
-	return ctc, func() error {
-		cancel()
+	return func() error {
+		ctc.cancel()
 		return <-streamErr
 	}
 }
 
 func TestReceiverTraces(t *testing.T) {
 	tc := newTestChannel()
-	ctc, stop := newCommonTestCase(t, tc, NotNoisy)
+	ctc := newCommonTestCase(t, tc, NotNoisy)
+
+	ctc.sendCall.AnyTimes().DoAndReturn(tc.doAndReturnSentStatus(nil))
+	ctc.consumers.tracesCall.AnyTimes().DoAndReturn(tc.doAndReturnConsumeTraces(nil))
+
+	stop := ctc.start()
 
 	td := testdata.GenerateTraces(2)
 	batch, err := ctc.producer.BatchArrowRecordsFromTraces(td)
@@ -231,13 +269,34 @@ func TestReceiverTraces(t *testing.T) {
 
 	// cmp.Diff works for new-style google protobuf protos.
 	require.Equal(t, "", cmp.Diff(tc.sentStatus, []*arrowpb.BatchStatus{
-		{
-			Statuses: []*arrowpb.StatusMessage{
-				{
-					BatchId:    batch.BatchId,
-					StatusCode: arrowpb.StatusCode_OK,
-				},
-			},
-		},
+		statusOKFor(batch.BatchId),
+	}, protocmp.Transform()))
+}
+
+func TestReceiverLogs(t *testing.T) {
+	tc := newTestChannel()
+	ctc := newCommonTestCase(t, tc, NotNoisy)
+
+	ctc.sendCall.AnyTimes().DoAndReturn(tc.doAndReturnSentStatus(nil))
+	ctc.consumers.logsCall.AnyTimes().DoAndReturn(tc.doAndReturnConsumeLogs(nil))
+
+	stop := ctc.start()
+
+	td := testdata.GenerateLogs(2)
+	batch, err := ctc.producer.BatchArrowRecordsFromLogs(td)
+	require.NoError(t, err)
+
+	tc.putBatch(batch, nil)
+
+	err = stop()
+	require.Error(t, err)
+	require.True(t, errors.Is(err, context.Canceled), "for %v", err)
+
+	// EqualValues works for the underlying gogo protos.
+	assert.EqualValues(t, tc.recvLogs, []plog.Logs{td})
+
+	// cmp.Diff works for new-style google protobuf protos.
+	require.Equal(t, "", cmp.Diff(tc.sentStatus, []*arrowpb.BatchStatus{
+		statusOKFor(batch.BatchId),
 	}, protocmp.Transform()))
 }
