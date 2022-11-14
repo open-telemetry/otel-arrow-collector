@@ -137,7 +137,7 @@ func (tc *testChannel) doAndReturnConsumeTraces(normalReturn error) func(ctx con
 		defer tc.rlock.Unlock()
 		copy := ptrace.NewTraces()
 		traces.CopyTo(copy)
-		tc.recvTraces = append(tc.recvTraces, traces)
+		tc.recvTraces = append(tc.recvTraces, copy)
 		return normalReturn
 	}
 }
@@ -148,7 +148,7 @@ func (tc *testChannel) doAndReturnConsumeLogs(normalReturn error) func(ctx conte
 		defer tc.rlock.Unlock()
 		copy := plog.NewLogs()
 		logs.CopyTo(copy)
-		tc.recvLogs = append(tc.recvLogs, logs)
+		tc.recvLogs = append(tc.recvLogs, copy)
 		return normalReturn
 	}
 }
