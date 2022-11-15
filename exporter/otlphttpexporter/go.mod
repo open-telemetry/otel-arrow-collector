@@ -14,11 +14,11 @@ require (
 
 require (
 	github.com/andybalholm/brotli v1.0.4 // indirect
-	github.com/apache/arrow/go/v10 v10.0.0 // indirect
+	github.com/apache/arrow/go/v11 v11.0.0-20221108144011-89a65b06a199 // indirect
 	github.com/apache/thrift v0.16.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.1.3 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/f5/otel-arrow-adapter v0.0.0-20221103221109-e19ddd3c7505 // indirect
+	github.com/f5/otel-arrow-adapter v0.0.0-20221111033209-0140de5d0a01 // indirect
 	github.com/felixge/httpsnoop v1.0.3 // indirect
 	github.com/go-logr/logr v1.2.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

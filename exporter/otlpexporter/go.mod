@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/apache/arrow/go/v10 v10.0.0
-	github.com/f5/otel-arrow-adapter v0.0.0-20221107214256-4690f2716fe3
+	github.com/f5/otel-arrow-adapter v0.0.0-20221111033209-0140de5d0a01
 	github.com/golang/mock v1.6.0
 	github.com/stretchr/testify v1.8.1
 	go.opentelemetry.io/collector v0.63.1
@@ -19,6 +19,7 @@ require (
 
 require (
 	github.com/andybalholm/brotli v1.0.4 // indirect
+	github.com/apache/arrow/go/v11 v11.0.0-20221108144011-89a65b06a199 // indirect
 	github.com/apache/thrift v0.16.0 // indirect
 	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.1.3 // indirect
