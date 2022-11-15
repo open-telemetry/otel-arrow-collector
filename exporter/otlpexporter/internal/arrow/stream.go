@@ -32,17 +32,17 @@ import (
 	"go.opentelemetry.io/collector/pdata/ptrace"
 )
 
-type ArrowProducer interface {
+type Producer interface {
 	BatchArrowRecordsFromTraces(ptrace.Traces) (*arrowpb.BatchArrowRecords, error)
 	BatchArrowRecordsFromLogs(plog.Logs) (*arrowpb.BatchArrowRecords, error)
 }
 
-var _ ArrowProducer = (*arrowRecord.Producer)(nil)
+var _ Producer = (*arrowRecord.Producer)(nil)
 
 // Stream is 1:1 with gRPC stream.
 type Stream struct {
 	// producer is exclusive to the holder of the stream.
-	producer ArrowProducer
+	producer Producer
 
 	// prioritizer has a reference to the stream, this allows it to be severed.
 	prioritizer *streamPrioritizer
@@ -77,7 +77,7 @@ type writeItem struct {
 
 // newStream constructs a stream
 func newStream(
-	producer ArrowProducer,
+	producer Producer,
 	prioritizer *streamPrioritizer,
 	telemetry component.TelemetrySettings,
 ) *Stream {

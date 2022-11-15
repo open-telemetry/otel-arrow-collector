@@ -22,7 +22,6 @@ import (
 
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
 	arrowCollectorMock "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1/mock"
-
 	"github.com/golang/mock/gomock"
 	"go.uber.org/zap/zaptest"
 	"google.golang.org/grpc"
@@ -206,11 +205,11 @@ func (tc *healthyTestChannel) onRecv(ctx context.Context) func() (*arrowpb.Batch
 				return nil, io.EOF
 			}
 
-			bId := recv.BatchId
+			bID := recv.BatchId
 			return &arrowpb.BatchStatus{
 				Statuses: []*arrowpb.StatusMessage{
 					{
-						BatchId:    bId,
+						BatchId:    bID,
 						StatusCode: arrowpb.StatusCode_OK,
 					},
 				},
@@ -290,7 +289,6 @@ func (tc *arrowUnsupportedTestChannel) onRecv(ctx context.Context) func() (*arro
 
 // disconnectedTestChannel allows the connection to time out.
 type disconnectedTestChannel struct {
-	ch chan struct{}
 }
 
 func newDisconnectedTestChannel() *disconnectedTestChannel {
