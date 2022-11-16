@@ -19,7 +19,7 @@ import (
 	"fmt"
 
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
-	batchEvent "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
+	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config"
@@ -49,16 +49,15 @@ type Receiver struct {
 	arrowpb.UnimplementedArrowStreamServiceServer
 
 	obsrecv       *obsreport.Receiver
-	arrowConsumer batchEvent.ConsumerAPI
+	arrowConsumer arrowRecord.ConsumerAPI
 }
 
 // New creates a new Receiver reference.
-// Note: use arrow_record.NewConsumer()
 func New(
 	id config.ComponentID,
 	cs Consumers,
 	set component.ReceiverCreateSettings,
-	ac batchEvent.ConsumerAPI,
+	ac arrowRecord.ConsumerAPI,
 ) *Receiver {
 	obs := obsreport.NewReceiver(obsreport.ReceiverSettings{
 		ReceiverID:             id,

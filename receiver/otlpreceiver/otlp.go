@@ -23,6 +23,7 @@ import (
 	"sync"
 
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
+	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -129,7 +130,7 @@ func (r *otlpReceiver) startProtocolServers(host component.Host) error {
 		}
 
 		if r.cfg.Arrow != nil && r.cfg.Arrow.Enabled {
-			r.arrowReceiver = arrow.New(r.cfg.ID(), arrow.Consumers(r), r.settings)
+			r.arrowReceiver = arrow.New(r.cfg.ID(), arrow.Consumers(r), r.settings, arrowRecord.NewConsumer())
 
 			arrowpb.RegisterArrowStreamServiceServer(r.serverGRPC, r.arrowReceiver)
 		}
