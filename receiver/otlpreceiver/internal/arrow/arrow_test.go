@@ -78,11 +78,6 @@ func (unhealthyTestChannel) onConsume() error {
 	return fmt.Errorf("consumer unhealthy")
 }
 
-type noisyTest bool
-
-const Noisy noisyTest = true
-const NotNoisy noisyTest = false
-
 type recvResult struct {
 	payload *arrowpb.BatchArrowRecords
 	err     error
@@ -98,11 +93,9 @@ type mockConsumers struct {
 	metricsCall *gomock.Call
 }
 
-func newTestTelemetry(t *testing.T, noisy noisyTest) component.TelemetrySettings {
+func newTestTelemetry(t *testing.T) component.TelemetrySettings {
 	telset := componenttest.NewNopTelemetrySettings()
-	if !noisy {
-		telset.Logger = zaptest.NewLogger(t)
-	}
+	telset.Logger = zaptest.NewLogger(t)
 	return telset
 }
 
@@ -197,7 +190,7 @@ func (m mockConsumers) Metrics() consumer.Metrics {
 
 var _ Consumers = mockConsumers{}
 
-func newCommonTestCase(t *testing.T, tc testChannel, noisy noisyTest) *commonTestCase {
+func newCommonTestCase(t *testing.T, tc testChannel) *commonTestCase {
 	ctrl := gomock.NewController(t)
 	stream := arrowCollectorMock.NewMockArrowStreamService_ArrowStreamServer(ctrl)
 	ac := arrowRecordMock.NewMockConsumerAPI(ctrl)
@@ -207,7 +200,7 @@ func newCommonTestCase(t *testing.T, tc testChannel, noisy noisyTest) *commonTes
 	ctc := &commonTestCase{
 		ctrl:          ctrl,
 		cancel:        cancel,
-		telset:        newTestTelemetry(t, noisy),
+		telset:        newTestTelemetry(t),
 		consumers:     newMockConsumers(ctrl),
 		stream:        stream,
 		receive:       make(chan recvResult),
@@ -291,7 +284,7 @@ func (ctc *commonTestCase) start() {
 
 func TestReceiverTraces(t *testing.T) {
 	tc := healthyTestChannel{}
-	ctc := newCommonTestCase(t, tc, NotNoisy)
+	ctc := newCommonTestCase(t, tc)
 
 	td := testdata.GenerateTraces(2)
 	batch, err := ctc.testProducer.BatchArrowRecordsFromTraces(td)
@@ -312,7 +305,7 @@ func TestReceiverTraces(t *testing.T) {
 
 func TestReceiverLogs(t *testing.T) {
 	tc := healthyTestChannel{}
-	ctc := newCommonTestCase(t, tc, NotNoisy)
+	ctc := newCommonTestCase(t, tc)
 
 	ld := testdata.GenerateLogs(2)
 	batch, err := ctc.testProducer.BatchArrowRecordsFromLogs(ld)
@@ -333,7 +326,7 @@ func TestReceiverLogs(t *testing.T) {
 
 func TestReceiverMetrics(t *testing.T) {
 	tc := healthyTestChannel{}
-	ctc := newCommonTestCase(t, tc, NotNoisy)
+	ctc := newCommonTestCase(t, tc)
 
 	md := testdata.GenerateMetrics(2)
 	batch, err := ctc.testProducer.BatchArrowRecordsFromMetrics(md)
@@ -354,7 +347,7 @@ func TestReceiverMetrics(t *testing.T) {
 
 func TestReceiverRecvError(t *testing.T) {
 	tc := healthyTestChannel{}
-	ctc := newCommonTestCase(t, tc, NotNoisy)
+	ctc := newCommonTestCase(t, tc)
 
 	ctc.start()
 
@@ -367,7 +360,7 @@ func TestReceiverRecvError(t *testing.T) {
 
 func TestReceiverSendError(t *testing.T) {
 	tc := healthyTestChannel{}
-	ctc := newCommonTestCase(t, tc, NotNoisy)
+	ctc := newCommonTestCase(t, tc)
 
 	ld := testdata.GenerateLogs(2)
 	batch, err := ctc.testProducer.BatchArrowRecordsFromLogs(ld)
@@ -388,7 +381,7 @@ func TestReceiverSendError(t *testing.T) {
 
 func TestReceiverConsumeError(t *testing.T) {
 	tc := unhealthyTestChannel{}
-	ctc := newCommonTestCase(t, tc, NotNoisy)
+	ctc := newCommonTestCase(t, tc)
 
 	td := testdata.GenerateTraces(2)
 	batch, err := ctc.testProducer.BatchArrowRecordsFromTraces(td)
@@ -409,7 +402,7 @@ func TestReceiverConsumeError(t *testing.T) {
 
 func TestReceiverInvalidData(t *testing.T) {
 	tc := unhealthyTestChannel{}
-	ctc := newCommonTestCase(t, tc, NotNoisy)
+	ctc := newCommonTestCase(t, tc)
 
 	td := testdata.GenerateTraces(2)
 	batch, err := ctc.testProducer.BatchArrowRecordsFromTraces(td)
@@ -428,7 +421,7 @@ func TestReceiverInvalidData(t *testing.T) {
 
 func TestReceiverEOF(t *testing.T) {
 	tc := healthyTestChannel{}
-	ctc := newCommonTestCase(t, tc, NotNoisy)
+	ctc := newCommonTestCase(t, tc)
 
 	td := testdata.GenerateTraces(2)
 	batch, err := ctc.testProducer.BatchArrowRecordsFromTraces(td)
