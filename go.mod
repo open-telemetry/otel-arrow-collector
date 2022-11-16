@@ -5,7 +5,7 @@ go 1.18
 require (
 	contrib.go.opencensus.io/exporter/prometheus v0.4.2
 	github.com/cenkalti/backoff/v4 v4.1.3
-	github.com/f5/otel-arrow-adapter v0.0.0-20221111033209-0140de5d0a01
+	github.com/f5/otel-arrow-adapter v0.0.0-20221116234146-d8ecadf9751b
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/mock v1.6.0
 	github.com/golang/snappy v0.0.4
@@ -49,7 +49,7 @@ require (
 
 require (
 	github.com/andybalholm/brotli v1.0.4 // indirect
-	github.com/apache/arrow/go/v11 v11.0.0-20221108144011-89a65b06a199 // indirect
+	github.com/apache/arrow/go/v11 v11.0.0-20221116153901-e38141421d43 // indirect
 	github.com/apache/thrift v0.16.0 // indirect
 	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
