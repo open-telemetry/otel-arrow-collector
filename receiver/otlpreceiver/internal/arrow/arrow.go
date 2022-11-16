@@ -49,14 +49,16 @@ type Receiver struct {
 	arrowpb.UnimplementedArrowStreamServiceServer
 
 	obsrecv       *obsreport.Receiver
-	arrowConsumer *batchEvent.Consumer
+	arrowConsumer batchEvent.ConsumerAPI
 }
 
 // New creates a new Receiver reference.
+// Note: use arrow_record.NewConsumer()
 func New(
 	id config.ComponentID,
 	cs Consumers,
 	set component.ReceiverCreateSettings,
+	ac batchEvent.ConsumerAPI,
 ) *Receiver {
 	obs := obsreport.NewReceiver(obsreport.ReceiverSettings{
 		ReceiverID:             id,
@@ -66,7 +68,7 @@ func New(
 	return &Receiver{
 		Consumers:     cs,
 		obsrecv:       obs,
-		arrowConsumer: batchEvent.NewConsumer(),
+		arrowConsumer: ac,
 	}
 }
 
@@ -87,23 +89,26 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStre
 			return err
 		}
 
-		// Process records:
-		err = r.processRecords(ctx, req)
-		if err != nil {
-			return err
-		}
+		// Process records: an error in this code path does
+		// not necessarily break the stream.
+		invalid, err := r.processRecords(ctx, req)
 
-		// TODO: We are not required to return a Status per
-		// request, what should the logic be?  For now sending
-		// one status per request received:
+		// Note: Statuses can be batched: TODO: should we?
 		resp := &arrowpb.BatchStatus{}
 		status := &arrowpb.StatusMessage{
-			BatchId:    req.GetBatchId(),
-			StatusCode: arrowpb.StatusCode_OK,
-			// TODO: `StatusMessage` has some provisions
-			// for returning information other than OK w/o
-			// breaking the stream, and I am not sure what
-			// those conditions are (e.g., retry suggestions).
+			BatchId: req.GetBatchId(),
+		}
+		if err == nil {
+			status.StatusCode = arrowpb.StatusCode_OK
+		} else {
+			status.StatusCode = arrowpb.StatusCode_ERROR
+			status.ErrorMessage = err.Error()
+
+			if invalid {
+				status.ErrorCode = arrowpb.ErrorCode_INVALID_ARGUMENT
+			} else {
+				status.ErrorCode = arrowpb.ErrorCode_UNAVAILABLE
+			}
 		}
 		resp.Statuses = append(resp.Statuses, status)
 
@@ -114,54 +119,57 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStre
 	}
 }
 
-func (r *Receiver) processRecords(ctx context.Context, records *arrowpb.BatchArrowRecords) error {
+// processRecords returns an error and a boolean indicating whether
+// the error (true) was from processing the data (i.e., invalid
+// argument) or (false) from the consuming pipeline.  The boolean is
+// not used when success (nil error) is returned.
+func (r *Receiver) processRecords(ctx context.Context, records *arrowpb.BatchArrowRecords) (invalid bool, _ error) {
 	payloads := records.GetOtlpArrowPayloads()
 	if len(payloads) == 0 {
-		return nil
+		return false, nil
 	}
 	// TODO: Use the obsreport object to instrument (somehow)
 	switch payloads[0].Type {
 	case arrowpb.OtlpArrowPayloadType_METRICS:
-		// otlp, err := r.arrowConsumer.MetricsFrom(records)
-		// if err != nil {
-		// 	return err
-		// }
-		// for _, logs := range otlp {
-		// 	err = r.Metrics().ConsumeMetrics(ctx, logs)
-		// 	if err != nil {
-		// 		return err
-		// 	}
-		// }
-		return ErrNoMetricsConsumer
+		otlp, err := r.arrowConsumer.MetricsFrom(records)
+		if err != nil {
+			return true, err
+		}
+		for _, logs := range otlp {
+			err = r.Metrics().ConsumeMetrics(ctx, logs)
+			if err != nil {
+				return false, err
+			}
+		}
 
 	case arrowpb.OtlpArrowPayloadType_LOGS:
 		otlp, err := r.arrowConsumer.LogsFrom(records)
 		if err != nil {
-			return err
+			return true, err
 		}
 
 		for _, logs := range otlp {
 			err = r.Logs().ConsumeLogs(ctx, logs)
 			if err != nil {
-				return err
+				return false, err
 			}
 		}
 
 	case arrowpb.OtlpArrowPayloadType_SPANS:
 		otlp, err := r.arrowConsumer.TracesFrom(records)
 		if err != nil {
-			return err
+			return true, err
 		}
 
 		for _, traces := range otlp {
 			err = r.Traces().ConsumeTraces(ctx, traces)
 			if err != nil {
-				return err
+				return false, err
 			}
 		}
 
 	default:
-		return ErrUnrecognizedPayload
+		return true, ErrUnrecognizedPayload
 	}
-	return nil
+	return false, nil
 }

@@ -17,20 +17,18 @@ package arrow
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
-	"sync"
 	"testing"
 
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
 	arrowCollectorMock "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1/mock"
 	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
+	arrowRecordMock "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record/mock"
 	"github.com/golang/mock/gomock"
-	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/testing/protocmp"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
@@ -38,9 +36,14 @@ import (
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/internal/testdata"
 	"go.opentelemetry.io/collector/pdata/plog"
+	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/arrow/mock"
 )
+
+// Note on protocol buffer comparison:
+// EqualValues works for the underlying gogo protos (plog, pmetric, ptrace).
+// cmp.Diff with protocmp.Transform option works for current google protobufs.
 
 type commonTestCase struct {
 	ctrl      *gomock.Controller
@@ -48,20 +51,31 @@ type commonTestCase struct {
 	telset    component.TelemetrySettings
 	consumers mockConsumers
 	stream    *arrowCollectorMock.MockArrowStreamService_ArrowStreamServer
-	producer  *arrowRecord.Producer
+	receive   chan recvResult
+	consume   chan interface{}
+	streamErr chan error
+
+	testProducer  *arrowRecord.Producer
+	arrowConsumer *arrowRecordMock.MockConsumerAPI
 
 	ctxCall  *gomock.Call
-	sendCall *gomock.Call
 	recvCall *gomock.Call
 }
 
-type testChannel struct {
-	ch chan recvResult
+type testChannel interface {
+	onConsume() error
+}
 
-	rlock      sync.Mutex
-	sentStatus []*arrowpb.BatchStatus
-	recvTraces []ptrace.Traces
-	recvLogs   []plog.Logs
+type healthyTestChannel struct{}
+
+func (healthyTestChannel) onConsume() error {
+	return nil
+}
+
+type unhealthyTestChannel struct{}
+
+func (unhealthyTestChannel) onConsume() error {
+	return fmt.Errorf("consumer unhealthy")
 }
 
 type noisyTest bool
@@ -92,64 +106,57 @@ func newTestTelemetry(t *testing.T, noisy noisyTest) component.TelemetrySettings
 	return telset
 }
 
-func newTestChannel() *testChannel {
-	return &testChannel{
-		ch: make(chan recvResult),
-	}
-}
-
-func (tc *testChannel) putBatch(payload *arrowpb.BatchArrowRecords, err error) {
-	tc.ch <- recvResult{
+func (ctc *commonTestCase) putBatch(payload *arrowpb.BatchArrowRecords, err error) {
+	ctc.receive <- recvResult{
 		payload: payload,
 		err:     err,
 	}
 }
 
-func (tc *testChannel) getBatch() (*arrowpb.BatchArrowRecords, error) {
-	r, ok := <-tc.ch
-	if !ok {
-		return nil, io.EOF
-	}
-	return r.payload, r.err
-}
-
-func (tc *testChannel) doAndReturnSentStatus(normalReturn error) func(arg *arrowpb.BatchStatus) error {
-	return func(arg *arrowpb.BatchStatus) error {
-		tc.rlock.Lock()
-		defer tc.rlock.Unlock()
-		copy := &arrowpb.BatchStatus{}
-		data, err := proto.Marshal(arg)
-		if err != nil {
-			return err
+func (ctc *commonTestCase) doAndReturnGetBatch(ctx context.Context) func() (*arrowpb.BatchArrowRecords, error) {
+	return func() (*arrowpb.BatchArrowRecords, error) {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case r, ok := <-ctc.receive:
+			if !ok {
+				return nil, io.EOF
+			}
+			return r.payload, r.err
 		}
-		if err := proto.Unmarshal(data, copy); err != nil {
-			return err
-		}
-
-		tc.sentStatus = append(tc.sentStatus, copy)
-		return normalReturn
 	}
 }
 
-func (tc *testChannel) doAndReturnConsumeTraces(normalReturn error) func(ctx context.Context, traces ptrace.Traces) error {
+func (ctc *commonTestCase) doAndReturnConsumeTraces(tc testChannel) func(ctx context.Context, traces ptrace.Traces) error {
 	return func(ctx context.Context, traces ptrace.Traces) error {
-		tc.rlock.Lock()
-		defer tc.rlock.Unlock()
-		copy := ptrace.NewTraces()
-		traces.CopyTo(copy)
-		tc.recvTraces = append(tc.recvTraces, copy)
-		return normalReturn
+		select {
+		case ctc.consume <- traces:
+			return tc.onConsume()
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }
 
-func (tc *testChannel) doAndReturnConsumeLogs(normalReturn error) func(ctx context.Context, logs plog.Logs) error {
+func (ctc *commonTestCase) doAndReturnConsumeMetrics(tc testChannel) func(ctx context.Context, metrics pmetric.Metrics) error {
+	return func(ctx context.Context, metrics pmetric.Metrics) error {
+		select {
+		case ctc.consume <- metrics:
+			return tc.onConsume()
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+func (ctc *commonTestCase) doAndReturnConsumeLogs(tc testChannel) func(ctx context.Context, logs plog.Logs) error {
 	return func(ctx context.Context, logs plog.Logs) error {
-		tc.rlock.Lock()
-		defer tc.rlock.Unlock()
-		copy := plog.NewLogs()
-		logs.CopyTo(copy)
-		tc.recvLogs = append(tc.recvLogs, copy)
-		return normalReturn
+		select {
+		case ctc.consume <- logs:
+			return tc.onConsume()
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }
 
@@ -190,28 +197,43 @@ func (m mockConsumers) Metrics() consumer.Metrics {
 
 var _ Consumers = mockConsumers{}
 
-func newCommonTestCase(t *testing.T, tc *testChannel, noisy noisyTest) *commonTestCase {
+func newCommonTestCase(t *testing.T, tc testChannel, noisy noisyTest) *commonTestCase {
 	ctrl := gomock.NewController(t)
 	stream := arrowCollectorMock.NewMockArrowStreamService_ArrowStreamServer(ctrl)
+	ac := arrowRecordMock.NewMockConsumerAPI(ctrl)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	ctc := &commonTestCase{
-		ctrl:      ctrl,
-		cancel:    cancel,
-		telset:    newTestTelemetry(t, noisy),
-		consumers: newMockConsumers(ctrl),
-		stream:    stream,
-		producer:  arrowRecord.NewProducer(),
-		ctxCall:   stream.EXPECT().Context().Times(0),
-		recvCall:  stream.EXPECT().Recv().Times(0),
-		sendCall:  stream.EXPECT().Send(gomock.Any()).Times(0),
+		ctrl:          ctrl,
+		cancel:        cancel,
+		telset:        newTestTelemetry(t, noisy),
+		consumers:     newMockConsumers(ctrl),
+		stream:        stream,
+		receive:       make(chan recvResult),
+		consume:       make(chan interface{}),
+		streamErr:     make(chan error),
+		testProducer:  arrowRecord.NewProducer(),
+		arrowConsumer: ac,
+		ctxCall:       stream.EXPECT().Context().Times(0),
+		recvCall:      stream.EXPECT().Recv().Times(0),
 	}
 
 	ctc.ctxCall.AnyTimes().Return(ctx)
-	ctc.recvCall.AnyTimes().DoAndReturn(tc.getBatch)
-
+	ctc.recvCall.AnyTimes().DoAndReturn(ctc.doAndReturnGetBatch(ctx))
+	ctc.consumers.tracesCall.AnyTimes().DoAndReturn(ctc.doAndReturnConsumeTraces(tc))
+	ctc.consumers.logsCall.AnyTimes().DoAndReturn(ctc.doAndReturnConsumeLogs(tc))
+	ctc.consumers.metricsCall.AnyTimes().DoAndReturn(ctc.doAndReturnConsumeMetrics(tc))
 	return ctc
+}
+
+func (ctc *commonTestCase) cancelAndWait() error {
+	ctc.cancel()
+	return ctc.wait()
+}
+
+func (ctc *commonTestCase) wait() error {
+	return <-ctc.streamErr
 }
 
 func statusOKFor(batchID string) *arrowpb.BatchStatus {
@@ -225,79 +247,214 @@ func statusOKFor(batchID string) *arrowpb.BatchStatus {
 	}
 }
 
-func (ctc *commonTestCase) start() func() error {
-	streamErr := make(chan error)
+func statusUnavailableFor(batchID string, msg string) *arrowpb.BatchStatus {
+	return &arrowpb.BatchStatus{
+		Statuses: []*arrowpb.StatusMessage{
+			{
+				BatchId:      batchID,
+				StatusCode:   arrowpb.StatusCode_ERROR,
+				ErrorCode:    arrowpb.ErrorCode_UNAVAILABLE,
+				ErrorMessage: msg,
+			},
+		},
+	}
+}
 
+func statusInvalidFor(batchID string, msg string) *arrowpb.BatchStatus {
+	return &arrowpb.BatchStatus{
+		Statuses: []*arrowpb.StatusMessage{
+			{
+				BatchId:      batchID,
+				StatusCode:   arrowpb.StatusCode_ERROR,
+				ErrorCode:    arrowpb.ErrorCode_INVALID_ARGUMENT,
+				ErrorMessage: msg,
+			},
+		},
+	}
+}
+
+func (ctc *commonTestCase) start() {
 	rcvr := New(
 		config.NewComponentID("arrowtest"),
 		ctc.consumers,
 		component.ReceiverCreateSettings{
 			TelemetrySettings: ctc.telset,
 			BuildInfo:         component.NewDefaultBuildInfo(),
-		})
+		},
+		ctc.arrowConsumer,
+	)
 
 	go func() {
-		streamErr <- rcvr.ArrowStream(ctc.stream)
+		ctc.streamErr <- rcvr.ArrowStream(ctc.stream)
 	}()
-
-	return func() error {
-		ctc.cancel()
-		return <-streamErr
-	}
 }
 
 func TestReceiverTraces(t *testing.T) {
-	tc := newTestChannel()
+	tc := healthyTestChannel{}
 	ctc := newCommonTestCase(t, tc, NotNoisy)
 
-	ctc.sendCall.AnyTimes().DoAndReturn(tc.doAndReturnSentStatus(nil))
-	ctc.consumers.tracesCall.AnyTimes().DoAndReturn(tc.doAndReturnConsumeTraces(nil))
-
-	stop := ctc.start()
-
 	td := testdata.GenerateTraces(2)
-	batch, err := ctc.producer.BatchArrowRecordsFromTraces(td)
+	batch, err := ctc.testProducer.BatchArrowRecordsFromTraces(td)
 	require.NoError(t, err)
 
-	tc.putBatch(batch, nil)
+	ctc.arrowConsumer.EXPECT().TracesFrom(batch).Times(1).Return([]ptrace.Traces{td}, nil)
+	ctc.stream.EXPECT().Send(statusOKFor(batch.BatchId)).Times(1).Return(nil)
 
-	err = stop()
+	ctc.start()
+	ctc.putBatch(batch, nil)
+
+	assert.EqualValues(t, td, <-ctc.consume)
+
+	err = ctc.cancelAndWait()
 	require.Error(t, err)
 	require.True(t, errors.Is(err, context.Canceled))
-
-	// EqualValues works for the underlying gogo protos.
-	assert.EqualValues(t, tc.recvTraces, []ptrace.Traces{td})
-
-	// cmp.Diff works for new-style google protobuf protos.
-	require.Equal(t, "", cmp.Diff(tc.sentStatus, []*arrowpb.BatchStatus{
-		statusOKFor(batch.BatchId),
-	}, protocmp.Transform()))
 }
 
 func TestReceiverLogs(t *testing.T) {
-	tc := newTestChannel()
+	tc := healthyTestChannel{}
 	ctc := newCommonTestCase(t, tc, NotNoisy)
 
-	ctc.sendCall.AnyTimes().DoAndReturn(tc.doAndReturnSentStatus(nil))
-	ctc.consumers.logsCall.AnyTimes().DoAndReturn(tc.doAndReturnConsumeLogs(nil))
-
-	stop := ctc.start()
-
-	td := testdata.GenerateLogs(2)
-	batch, err := ctc.producer.BatchArrowRecordsFromLogs(td)
+	ld := testdata.GenerateLogs(2)
+	batch, err := ctc.testProducer.BatchArrowRecordsFromLogs(ld)
 	require.NoError(t, err)
 
-	tc.putBatch(batch, nil)
+	ctc.arrowConsumer.EXPECT().LogsFrom(batch).Times(1).Return([]plog.Logs{ld}, nil)
+	ctc.stream.EXPECT().Send(statusOKFor(batch.BatchId)).Times(1).Return(nil)
 
-	err = stop()
+	ctc.start()
+	ctc.putBatch(batch, nil)
+
+	assert.EqualValues(t, ld, <-ctc.consume)
+
+	err = ctc.cancelAndWait()
 	require.Error(t, err)
 	require.True(t, errors.Is(err, context.Canceled), "for %v", err)
+}
 
-	// EqualValues works for the underlying gogo protos.
-	assert.EqualValues(t, tc.recvLogs, []plog.Logs{td})
+func TestReceiverMetrics(t *testing.T) {
+	tc := healthyTestChannel{}
+	ctc := newCommonTestCase(t, tc, NotNoisy)
 
-	// cmp.Diff works for new-style google protobuf protos.
-	require.Equal(t, "", cmp.Diff(tc.sentStatus, []*arrowpb.BatchStatus{
-		statusOKFor(batch.BatchId),
-	}, protocmp.Transform()))
+	md := testdata.GenerateMetrics(2)
+	batch, err := ctc.testProducer.BatchArrowRecordsFromMetrics(md)
+	require.NoError(t, err)
+
+	ctc.arrowConsumer.EXPECT().MetricsFrom(batch).Times(1).Return([]pmetric.Metrics{md}, nil)
+	ctc.stream.EXPECT().Send(statusOKFor(batch.BatchId)).Times(1).Return(nil)
+
+	ctc.start()
+	ctc.putBatch(batch, nil)
+
+	assert.EqualValues(t, md, <-ctc.consume)
+
+	err = ctc.cancelAndWait()
+	require.Error(t, err)
+	require.True(t, errors.Is(err, context.Canceled), "for %v", err)
+}
+
+func TestReceiverRecvError(t *testing.T) {
+	tc := healthyTestChannel{}
+	ctc := newCommonTestCase(t, tc, NotNoisy)
+
+	ctc.start()
+
+	ctc.putBatch(nil, fmt.Errorf("test recv error"))
+
+	err := ctc.wait()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "test recv error")
+}
+
+func TestReceiverSendError(t *testing.T) {
+	tc := healthyTestChannel{}
+	ctc := newCommonTestCase(t, tc, NotNoisy)
+
+	ld := testdata.GenerateLogs(2)
+	batch, err := ctc.testProducer.BatchArrowRecordsFromLogs(ld)
+	require.NoError(t, err)
+
+	ctc.arrowConsumer.EXPECT().LogsFrom(batch).Times(1).Return([]plog.Logs{ld}, nil)
+	ctc.stream.EXPECT().Send(statusOKFor(batch.BatchId)).Times(1).Return(fmt.Errorf("test send error"))
+
+	ctc.start()
+	ctc.putBatch(batch, nil)
+
+	assert.EqualValues(t, ld, <-ctc.consume)
+
+	err = ctc.wait()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "test send error")
+}
+
+func TestReceiverConsumeError(t *testing.T) {
+	tc := unhealthyTestChannel{}
+	ctc := newCommonTestCase(t, tc, NotNoisy)
+
+	td := testdata.GenerateTraces(2)
+	batch, err := ctc.testProducer.BatchArrowRecordsFromTraces(td)
+	require.NoError(t, err)
+
+	ctc.arrowConsumer.EXPECT().TracesFrom(batch).Times(1).Return([]ptrace.Traces{td}, nil)
+	ctc.stream.EXPECT().Send(statusUnavailableFor(batch.BatchId, "consumer unhealthy")).Times(1).Return(nil)
+
+	ctc.start()
+
+	ctc.putBatch(batch, nil)
+	assert.EqualValues(t, td, <-ctc.consume)
+
+	err = ctc.cancelAndWait()
+	require.Error(t, err)
+	require.True(t, errors.Is(err, context.Canceled), "for %v", err)
+}
+
+func TestReceiverInvalidData(t *testing.T) {
+	tc := unhealthyTestChannel{}
+	ctc := newCommonTestCase(t, tc, NotNoisy)
+
+	td := testdata.GenerateTraces(2)
+	batch, err := ctc.testProducer.BatchArrowRecordsFromTraces(td)
+	require.NoError(t, err)
+
+	ctc.arrowConsumer.EXPECT().TracesFrom(batch).Times(1).Return(nil, fmt.Errorf("test invalid error"))
+	ctc.stream.EXPECT().Send(statusInvalidFor(batch.BatchId, "test invalid error")).Times(1).Return(nil)
+
+	ctc.start()
+	ctc.putBatch(batch, nil)
+
+	err = ctc.cancelAndWait()
+	require.Error(t, err)
+	require.True(t, errors.Is(err, context.Canceled), "for %v", err)
+}
+
+func TestReceiverEOF(t *testing.T) {
+	tc := healthyTestChannel{}
+	ctc := newCommonTestCase(t, tc, NotNoisy)
+
+	td := testdata.GenerateTraces(2)
+	batch, err := ctc.testProducer.BatchArrowRecordsFromTraces(td)
+	require.NoError(t, err)
+
+	// send a sequence of data then simulate closing the connection.
+	const times = 10
+
+	ctc.arrowConsumer.EXPECT().TracesFrom(batch).Times(times).Return([]ptrace.Traces{td}, nil)
+	ctc.stream.EXPECT().Send(statusOKFor(batch.BatchId)).Times(times).Return(nil)
+
+	ctc.start()
+
+	go func() {
+		for i := 0; i < times; i++ {
+			ctc.putBatch(batch, nil)
+		}
+
+		close(ctc.receive)
+	}()
+
+	for i := 0; i < times; i++ {
+		assert.EqualValues(t, td, <-ctc.consume)
+	}
+
+	err = ctc.wait()
+	require.Error(t, err)
+	require.True(t, errors.Is(err, io.EOF))
 }
