@@ -39,12 +39,14 @@ type streamTestCase struct {
 	*commonTestCase
 	*commonTestStream
 
-	producer       *arrowRecordMock.MockProducerAPI
-	prioritizer    *streamPrioritizer
-	bgctx          context.Context
-	bgcancel       context.CancelFunc
-	fromTracesCall *gomock.Call
-	stream         *Stream
+	producer        *arrowRecordMock.MockProducerAPI
+	prioritizer     *streamPrioritizer
+	bgctx           context.Context
+	bgcancel        context.CancelFunc
+	fromTracesCall  *gomock.Call
+	fromMetricsCall *gomock.Call
+	fromLogsCall    *gomock.Call
+	stream          *Stream
 }
 
 func newStreamTestCase(t *testing.T) *streamTestCase {
@@ -61,6 +63,8 @@ func newStreamTestCase(t *testing.T) *streamTestCase {
 	stream := newStream(producer, prio, ctc.telset)
 
 	fromTracesCall := producer.EXPECT().BatchArrowRecordsFromTraces(gomock.Any()).Times(0)
+	fromMetricsCall := producer.EXPECT().BatchArrowRecordsFromMetrics(gomock.Any()).Times(0)
+	fromLogsCall := producer.EXPECT().BatchArrowRecordsFromLogs(gomock.Any()).Times(0)
 
 	return &streamTestCase{
 		commonTestCase:   ctc,
@@ -71,6 +75,8 @@ func newStreamTestCase(t *testing.T) *streamTestCase {
 		bgcancel:         cancel,
 		stream:           stream,
 		fromTracesCall:   fromTracesCall,
+		fromMetricsCall:  fromMetricsCall,
+		fromLogsCall:     fromLogsCall,
 	}
 }
 
@@ -83,7 +89,7 @@ func (tc *streamTestCase) start(channel testChannel) func() {
 
 	go func() {
 		defer wait.Done()
-		tc.stream.run(tc.bgctx, tc.serviceClient, waitForReadyOption)
+		tc.stream.run(tc.bgctx, tc.serviceClient, nil)
 	}()
 
 	return func() {
