@@ -20,6 +20,7 @@ import (
 
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
 	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"go.opentelemetry.io/collector/component"
@@ -157,8 +158,10 @@ func (e *Exporter) runArrowStream(ctx context.Context) {
 	stream := newStream(producer, e.ready, e.telemetry)
 
 	defer func() {
+		if err := producer.Close(); err != nil {
+			e.telemetry.Logger.Error("arrow producer close:", zap.Error(err))
+		}
 		e.wg.Done()
-		producer.Close()
 		e.returning <- stream
 	}()
 

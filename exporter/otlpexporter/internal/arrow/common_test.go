@@ -166,12 +166,14 @@ func (ctc *commonTestCase) repeatedNewStream(nc func() testChannel) func(context
 
 // healthyTestChannel accepts the connection and returns an OK status immediately.
 type healthyTestChannel struct {
-	ch chan *arrowpb.BatchArrowRecords
+	sent chan *arrowpb.BatchArrowRecords
+	recv chan *arrowpb.BatchStatus
 }
 
 func newHealthyTestChannel(sz int) *healthyTestChannel {
 	return &healthyTestChannel{
-		ch: make(chan *arrowpb.BatchArrowRecords, sz),
+		sent: make(chan *arrowpb.BatchArrowRecords, sz),
+		recv: make(chan *arrowpb.BatchStatus, sz),
 	}
 }
 
@@ -182,7 +184,7 @@ func (tc *healthyTestChannel) onConnect(_ context.Context) error {
 func (tc *healthyTestChannel) onSend(ctx context.Context) func(*arrowpb.BatchArrowRecords) error {
 	return func(req *arrowpb.BatchArrowRecords) error {
 		select {
-		case tc.ch <- req:
+		case tc.sent <- req:
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
@@ -193,20 +195,12 @@ func (tc *healthyTestChannel) onSend(ctx context.Context) func(*arrowpb.BatchArr
 func (tc *healthyTestChannel) onRecv(ctx context.Context) func() (*arrowpb.BatchStatus, error) {
 	return func() (*arrowpb.BatchStatus, error) {
 		select {
-		case recv, ok := <-tc.ch:
+		case recv, ok := <-tc.recv:
 			if !ok {
 				return nil, io.EOF
 			}
 
-			bID := recv.BatchId
-			return &arrowpb.BatchStatus{
-				Statuses: []*arrowpb.StatusMessage{
-					{
-						BatchId:    bID,
-						StatusCode: arrowpb.StatusCode_OK,
-					},
-				},
-			}, nil
+			return recv, nil
 		case <-ctx.Done():
 			return &arrowpb.BatchStatus{}, ctx.Err()
 		}
