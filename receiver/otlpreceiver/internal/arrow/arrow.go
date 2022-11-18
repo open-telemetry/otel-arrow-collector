@@ -12,18 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package arrow
+package arrow // import "go.opentelemetry.io/collector/receiver/otlpreceiver/internal/arrow"
 
 import (
 	"context"
 	"fmt"
 
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
-	batchEvent "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
+	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/consumer"
+	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/obsreport"
 )
 
@@ -49,7 +50,7 @@ type Receiver struct {
 	arrowpb.UnimplementedArrowStreamServiceServer
 
 	obsrecv       *obsreport.Receiver
-	arrowConsumer *batchEvent.Consumer
+	arrowConsumer arrowRecord.ConsumerAPI
 }
 
 // New creates a new Receiver reference.
@@ -57,6 +58,7 @@ func New(
 	id config.ComponentID,
 	cs Consumers,
 	set component.ReceiverCreateSettings,
+	ac arrowRecord.ConsumerAPI,
 ) *Receiver {
 	obs := obsreport.NewReceiver(obsreport.ReceiverSettings{
 		ReceiverID:             id,
@@ -66,7 +68,7 @@ func New(
 	return &Receiver{
 		Consumers:     cs,
 		obsrecv:       obs,
-		arrowConsumer: batchEvent.NewConsumer(),
+		arrowConsumer: ac,
 	}
 }
 
@@ -87,23 +89,26 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStre
 			return err
 		}
 
-		// Process records:
+		// Process records: an error in this code path does
+		// not necessarily break the stream.
 		err = r.processRecords(ctx, req)
-		if err != nil {
-			return err
-		}
 
-		// TODO: We are not required to return a Status per
-		// request, what should the logic be?  For now sending
-		// one status per request received:
+		// Note: Statuses can be batched: TODO: should we?
 		resp := &arrowpb.BatchStatus{}
 		status := &arrowpb.StatusMessage{
-			BatchId:    req.GetBatchId(),
-			StatusCode: arrowpb.StatusCode_OK,
-			// TODO: `StatusMessage` has some provisions
-			// for returning information other than OK w/o
-			// breaking the stream, and I am not sure what
-			// those conditions are (e.g., retry suggestions).
+			BatchId: req.GetBatchId(),
+		}
+		if err == nil {
+			status.StatusCode = arrowpb.StatusCode_OK
+		} else {
+			status.StatusCode = arrowpb.StatusCode_ERROR
+			status.ErrorMessage = err.Error()
+
+			if consumererror.IsPermanent(err) {
+				status.ErrorCode = arrowpb.ErrorCode_INVALID_ARGUMENT
+			} else {
+				status.ErrorCode = arrowpb.ErrorCode_UNAVAILABLE
+			}
 		}
 		resp.Statuses = append(resp.Statuses, status)
 
@@ -114,6 +119,10 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStre
 	}
 }
 
+// processRecords returns an error and a boolean indicating whether
+// the error (true) was from processing the data (i.e., invalid
+// argument) or (false) from the consuming pipeline.  The boolean is
+// not used when success (nil error) is returned.
 func (r *Receiver) processRecords(ctx context.Context, records *arrowpb.BatchArrowRecords) error {
 	payloads := records.GetOtlpArrowPayloads()
 	if len(payloads) == 0 {
@@ -122,22 +131,21 @@ func (r *Receiver) processRecords(ctx context.Context, records *arrowpb.BatchArr
 	// TODO: Use the obsreport object to instrument (somehow)
 	switch payloads[0].Type {
 	case arrowpb.OtlpArrowPayloadType_METRICS:
-		// otlp, err := r.arrowConsumer.MetricsFrom(records)
-		// if err != nil {
-		// 	return err
-		// }
-		// for _, logs := range otlp {
-		// 	err = r.Metrics().ConsumeMetrics(ctx, logs)
-		// 	if err != nil {
-		// 		return err
-		// 	}
-		// }
-		return ErrNoMetricsConsumer
+		otlp, err := r.arrowConsumer.MetricsFrom(records)
+		if err != nil {
+			return consumererror.NewPermanent(err)
+		}
+		for _, metrics := range otlp {
+			err = r.Metrics().ConsumeMetrics(ctx, metrics)
+			if err != nil {
+				return err
+			}
+		}
 
 	case arrowpb.OtlpArrowPayloadType_LOGS:
 		otlp, err := r.arrowConsumer.LogsFrom(records)
 		if err != nil {
-			return err
+			return consumererror.NewPermanent(err)
 		}
 
 		for _, logs := range otlp {
@@ -150,7 +158,7 @@ func (r *Receiver) processRecords(ctx context.Context, records *arrowpb.BatchArr
 	case arrowpb.OtlpArrowPayloadType_SPANS:
 		otlp, err := r.arrowConsumer.TracesFrom(records)
 		if err != nil {
-			return err
+			return consumererror.NewPermanent(err)
 		}
 
 		for _, traces := range otlp {
