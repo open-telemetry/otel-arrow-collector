@@ -129,7 +129,7 @@ func TestStreamEncodeError(t *testing.T) {
 	testErr := fmt.Errorf("test encode error")
 	tc.fromTracesCall.Times(1).Return(nil, testErr)
 
-	cleanup := tc.start(newHealthyTestChannel(1))
+	cleanup := tc.start(newHealthyTestChannel())
 	defer cleanup()
 
 	// sender should get a permanent testErr

@@ -170,10 +170,10 @@ type healthyTestChannel struct {
 	recv chan *arrowpb.BatchStatus
 }
 
-func newHealthyTestChannel(sz int) *healthyTestChannel {
+func newHealthyTestChannel() *healthyTestChannel {
 	return &healthyTestChannel{
-		sent: make(chan *arrowpb.BatchArrowRecords, sz),
-		recv: make(chan *arrowpb.BatchStatus, sz),
+		sent: make(chan *arrowpb.BatchArrowRecords),
+		recv: make(chan *arrowpb.BatchStatus),
 	}
 }
 

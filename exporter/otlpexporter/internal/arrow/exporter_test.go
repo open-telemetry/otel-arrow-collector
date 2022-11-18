@@ -26,6 +26,7 @@ import (
 	arrowRecordMock "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record/mock"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/require"
+
 	"go.opentelemetry.io/collector/internal/testdata"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -75,7 +76,7 @@ func statusOKFor(id string) *arrowpb.BatchStatus {
 func TestArrowExporterSuccess(t *testing.T) {
 	for _, inputData := range []interface{}{twoTraces, twoMetrics, twoLogs} {
 		tc := newExporterTestCase(t, NotNoisy, singleStreamSettings)
-		channel := newHealthyTestChannel(1)
+		channel := newHealthyTestChannel()
 
 		tc.streamCall.Times(1).DoAndReturn(tc.returnNewStream(channel))
 
@@ -192,7 +193,7 @@ func TestArrowExporterConnectTimeout(t *testing.T) {
 func TestArrowExporterStreamFailure(t *testing.T) {
 	tc := newExporterTestCase(t, NotNoisy, singleStreamSettings)
 	channel0 := newUnresponsiveTestChannel()
-	channel1 := newHealthyTestChannel(1)
+	channel1 := newHealthyTestChannel()
 
 	tc.streamCall.AnyTimes().DoAndReturn(tc.returnNewStream(channel0, channel1))
 
@@ -267,7 +268,7 @@ func TestArrowExporterStreamRace(t *testing.T) {
 // TestArrowExporterStreaming tests 10 sends in a row.
 func TestArrowExporterStreaming(t *testing.T) {
 	tc := newExporterTestCase(t, NotNoisy, singleStreamSettings)
-	channel := newHealthyTestChannel(1)
+	channel := newHealthyTestChannel()
 
 	tc.streamCall.AnyTimes().DoAndReturn(tc.returnNewStream(channel))
 
