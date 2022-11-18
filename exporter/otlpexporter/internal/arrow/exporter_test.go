@@ -30,7 +30,7 @@ type exporterTestCase struct {
 
 func newExporterTestCase(t *testing.T, noisy noisyTest, arrowset Settings) *exporterTestCase {
 	ctc := newCommonTestCase(t, noisy)
-	exp := NewExporter(arrowset, ctc.telset, ctc.serviceClient, waitForReadyOption)
+	exp := NewExporter(arrowset, ctc.telset, ctc.serviceClient, nil)
 
 	return &exporterTestCase{
 		commonTestCase: ctc,
@@ -40,20 +40,22 @@ func newExporterTestCase(t *testing.T, noisy noisyTest, arrowset Settings) *expo
 
 // TestArrowExporterSuccess tests a single Send through a healthy channel.
 func TestArrowExporterSuccess(t *testing.T) {
-	tc := newExporterTestCase(t, NotNoisy, singleStreamSettings)
-	channel := newHealthyTestChannel(1)
+	for _, data := range []interface{}{twoTraces, twoMetrics, twoLogs} {
+		tc := newExporterTestCase(t, NotNoisy, singleStreamSettings)
+		channel := newHealthyTestChannel(1)
 
-	tc.streamCall.Times(1).DoAndReturn(tc.returnNewStream(channel))
+		tc.streamCall.Times(1).DoAndReturn(tc.returnNewStream(channel))
 
-	ctx := context.Background()
-	require.NoError(t, tc.exporter.Start(ctx))
+		ctx := context.Background()
+		require.NoError(t, tc.exporter.Start(ctx))
 
-	consumer, err := tc.exporter.GetStream(ctx)
-	require.NoError(t, err)
+		consumer, err := tc.exporter.GetStream(ctx)
+		require.NoError(t, err)
 
-	require.NoError(t, consumer.SendAndWait(ctx, twoTraces))
+		require.NoError(t, consumer.SendAndWait(ctx, data))
 
-	require.NoError(t, tc.exporter.Shutdown(ctx))
+		require.NoError(t, tc.exporter.Shutdown(ctx))
+	}
 }
 
 // TestArrowExporterTimeout tests that single slow Send leads to context canceled.

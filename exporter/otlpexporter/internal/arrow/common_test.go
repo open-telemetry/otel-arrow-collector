@@ -37,15 +37,6 @@ import (
 // collector level in a more general way).
 
 var (
-	waitForReadyOption = []grpc.CallOption{
-		grpc.WaitForReady(true),
-	}
-
-	// TODO: Test this
-	// nowaitForReadyOption = []grpc.CallOption{
-	// 	grpc.WaitForReady(false),
-	// }
-
 	singleStreamSettings = Settings{
 		Enabled:    true,
 		NumStreams: 1,
@@ -56,7 +47,9 @@ var (
 		NumStreams: 2,
 	}
 
-	twoTraces = testdata.GenerateTraces(2)
+	twoTraces  = testdata.GenerateTraces(2)
+	twoMetrics = testdata.GenerateMetrics(2)
+	twoLogs    = testdata.GenerateLogs(2)
 )
 
 type testChannel interface {

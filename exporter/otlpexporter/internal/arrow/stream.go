@@ -32,17 +32,10 @@ import (
 	"go.opentelemetry.io/collector/pdata/ptrace"
 )
 
-type Producer interface {
-	BatchArrowRecordsFromTraces(ptrace.Traces) (*arrowpb.BatchArrowRecords, error)
-	BatchArrowRecordsFromLogs(plog.Logs) (*arrowpb.BatchArrowRecords, error)
-}
-
-var _ Producer = (*arrowRecord.Producer)(nil)
-
 // Stream is 1:1 with gRPC stream.
 type Stream struct {
 	// producer is exclusive to the holder of the stream.
-	producer Producer
+	producer arrowRecord.ProducerAPI
 
 	// prioritizer has a reference to the stream, this allows it to be severed.
 	prioritizer *streamPrioritizer
@@ -77,7 +70,7 @@ type writeItem struct {
 
 // newStream constructs a stream
 func newStream(
-	producer Producer,
+	producer arrowRecord.ProducerAPI,
 	prioritizer *streamPrioritizer,
 	telemetry component.TelemetrySettings,
 ) *Stream {
@@ -313,8 +306,7 @@ func (s *Stream) encode(records interface{}) (_ *arrowpb.BatchArrowRecords, retE
 	case plog.Logs:
 		batch, err = s.producer.BatchArrowRecordsFromLogs(data)
 	case pmetric.Metrics:
-		// TODO: This will follow.
-		return nil, fmt.Errorf("unsupported OTLP type: metrics")
+		batch, err = s.producer.BatchArrowRecordsFromMetrics(data)
 	default:
 		return nil, fmt.Errorf("unsupported OTLP type: %T", records)
 	}
