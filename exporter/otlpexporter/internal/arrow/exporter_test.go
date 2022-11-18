@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
+	arrowRecordMock "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -30,7 +32,11 @@ type exporterTestCase struct {
 
 func newExporterTestCase(t *testing.T, noisy noisyTest, arrowset Settings) *exporterTestCase {
 	ctc := newCommonTestCase(t, noisy)
-	exp := NewExporter(arrowset, ctc.telset, ctc.serviceClient, nil)
+	exp := NewExporter(arrowset, func() arrowRecord.ProducerAPI {
+		prod := arrowRecordMock.NewMockProducerAPI(ctc.ctrl)
+		prod.EXPECT().Close().Times(1)
+		return prod
+	}, ctc.telset, ctc.serviceClient, nil)
 
 	return &exporterTestCase{
 		commonTestCase: ctc,

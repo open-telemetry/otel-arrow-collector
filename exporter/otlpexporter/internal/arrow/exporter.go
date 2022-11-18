@@ -34,6 +34,9 @@ type Exporter struct {
 	// settings contains Arrow-specific parameters.
 	settings Settings
 
+	// newProducer returns a real (or mock) Producer.
+	newProducer func() arrowRecord.ProducerAPI
+
 	// telemetry includes logger, tracer, meter.
 	telemetry component.TelemetrySettings
 
@@ -71,12 +74,14 @@ type Exporter struct {
 // NewExporter configures a new Exporter.
 func NewExporter(
 	settings Settings,
+	newProducer func() arrowRecord.ProducerAPI,
 	telemetry component.TelemetrySettings,
 	client arrowpb.ArrowStreamServiceClient,
 	grpcOptions []grpc.CallOption,
 ) *Exporter {
 	return &Exporter{
 		settings:    settings,
+		newProducer: newProducer,
 		telemetry:   telemetry,
 		client:      client,
 		grpcOptions: grpcOptions,
@@ -148,10 +153,12 @@ func (e *Exporter) runStreamController(bgctx context.Context) {
 // to call writeStream() and performs readStream() itself.  When the stream shuts
 // down this call synchronously waits for and unblocks the consumers.
 func (e *Exporter) runArrowStream(ctx context.Context) {
-	stream := newStream(arrowRecord.NewProducer(), e.ready, e.telemetry)
+	producer := e.newProducer()
+	stream := newStream(producer, e.ready, e.telemetry)
 
 	defer func() {
 		e.wg.Done()
+		producer.Close()
 		e.returning <- stream
 	}()
 
