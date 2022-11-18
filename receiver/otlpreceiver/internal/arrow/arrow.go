@@ -135,8 +135,8 @@ func (r *Receiver) processRecords(ctx context.Context, records *arrowpb.BatchArr
 		if err != nil {
 			return consumererror.NewPermanent(err)
 		}
-		for _, logs := range otlp {
-			err = r.Metrics().ConsumeMetrics(ctx, logs)
+		for _, metrics := range otlp {
+			err = r.Metrics().ConsumeMetrics(ctx, metrics)
 			if err != nil {
 				return err
 			}
