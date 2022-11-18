@@ -55,8 +55,7 @@ type commonTestCase struct {
 	consume   chan interface{}
 	streamErr chan error
 
-	testProducer  *arrowRecord.Producer
-	arrowConsumer *arrowRecordMock.MockConsumerAPI
+	testProducer *arrowRecord.Producer
 
 	ctxCall  *gomock.Call
 	recvCall *gomock.Call
@@ -193,23 +192,21 @@ var _ Consumers = mockConsumers{}
 func newCommonTestCase(t *testing.T, tc testChannel) *commonTestCase {
 	ctrl := gomock.NewController(t)
 	stream := arrowCollectorMock.NewMockArrowStreamService_ArrowStreamServer(ctrl)
-	ac := arrowRecordMock.NewMockConsumerAPI(ctrl)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	ctc := &commonTestCase{
-		ctrl:          ctrl,
-		cancel:        cancel,
-		telset:        newTestTelemetry(t),
-		consumers:     newMockConsumers(ctrl),
-		stream:        stream,
-		receive:       make(chan recvResult),
-		consume:       make(chan interface{}),
-		streamErr:     make(chan error),
-		testProducer:  arrowRecord.NewProducer(),
-		arrowConsumer: ac,
-		ctxCall:       stream.EXPECT().Context().Times(0),
-		recvCall:      stream.EXPECT().Recv().Times(0),
+		ctrl:         ctrl,
+		cancel:       cancel,
+		telset:       newTestTelemetry(t),
+		consumers:    newMockConsumers(ctrl),
+		stream:       stream,
+		receive:      make(chan recvResult),
+		consume:      make(chan interface{}),
+		streamErr:    make(chan error),
+		testProducer: arrowRecord.NewProducer(),
+		ctxCall:      stream.EXPECT().Context().Times(0),
+		recvCall:     stream.EXPECT().Recv().Times(0),
 	}
 
 	ctc.ctxCall.AnyTimes().Return(ctx)
@@ -266,7 +263,30 @@ func statusInvalidFor(batchID string, msg string) *arrowpb.BatchStatus {
 	}
 }
 
-func (ctc *commonTestCase) start() {
+func (ctc *commonTestCase) newRealConsumer() arrowRecord.ConsumerAPI {
+	cons := arrowRecordMock.NewMockConsumerAPI(ctc.ctrl)
+	real := arrowRecord.NewConsumer()
+
+	cons.EXPECT().Close().Times(1).Return(nil)
+	cons.EXPECT().TracesFrom(gomock.Any()).AnyTimes().DoAndReturn(real.TracesFrom)
+	cons.EXPECT().MetricsFrom(gomock.Any()).AnyTimes().DoAndReturn(real.MetricsFrom)
+	cons.EXPECT().LogsFrom(gomock.Any()).AnyTimes().DoAndReturn(real.LogsFrom)
+
+	return cons
+}
+
+func (ctc *commonTestCase) newErrorConsumer() arrowRecord.ConsumerAPI {
+	cons := arrowRecordMock.NewMockConsumerAPI(ctc.ctrl)
+
+	cons.EXPECT().Close().Times(1).Return(nil)
+	cons.EXPECT().TracesFrom(gomock.Any()).AnyTimes().Return(nil, fmt.Errorf("test invalid error"))
+	cons.EXPECT().MetricsFrom(gomock.Any()).AnyTimes().Return(nil, fmt.Errorf("test invalid error"))
+	cons.EXPECT().LogsFrom(gomock.Any()).AnyTimes().Return(nil, fmt.Errorf("test invalid error"))
+
+	return cons
+}
+
+func (ctc *commonTestCase) start(newConsumer func() arrowRecord.ConsumerAPI) {
 	rcvr := New(
 		config.NewComponentID("arrowtest"),
 		ctc.consumers,
@@ -274,7 +294,7 @@ func (ctc *commonTestCase) start() {
 			TelemetrySettings: ctc.telset,
 			BuildInfo:         component.NewDefaultBuildInfo(),
 		},
-		ctc.arrowConsumer,
+		newConsumer,
 	)
 
 	go func() {
@@ -290,10 +310,9 @@ func TestReceiverTraces(t *testing.T) {
 	batch, err := ctc.testProducer.BatchArrowRecordsFromTraces(td)
 	require.NoError(t, err)
 
-	ctc.arrowConsumer.EXPECT().TracesFrom(batch).Times(1).Return([]ptrace.Traces{td}, nil)
 	ctc.stream.EXPECT().Send(statusOKFor(batch.BatchId)).Times(1).Return(nil)
 
-	ctc.start()
+	ctc.start(ctc.newRealConsumer)
 	ctc.putBatch(batch, nil)
 
 	assert.EqualValues(t, td, <-ctc.consume)
@@ -311,10 +330,9 @@ func TestReceiverLogs(t *testing.T) {
 	batch, err := ctc.testProducer.BatchArrowRecordsFromLogs(ld)
 	require.NoError(t, err)
 
-	ctc.arrowConsumer.EXPECT().LogsFrom(batch).Times(1).Return([]plog.Logs{ld}, nil)
 	ctc.stream.EXPECT().Send(statusOKFor(batch.BatchId)).Times(1).Return(nil)
 
-	ctc.start()
+	ctc.start(ctc.newRealConsumer)
 	ctc.putBatch(batch, nil)
 
 	assert.EqualValues(t, ld, <-ctc.consume)
@@ -332,10 +350,9 @@ func TestReceiverMetrics(t *testing.T) {
 	batch, err := ctc.testProducer.BatchArrowRecordsFromMetrics(md)
 	require.NoError(t, err)
 
-	ctc.arrowConsumer.EXPECT().MetricsFrom(batch).Times(1).Return([]pmetric.Metrics{md}, nil)
 	ctc.stream.EXPECT().Send(statusOKFor(batch.BatchId)).Times(1).Return(nil)
 
-	ctc.start()
+	ctc.start(ctc.newRealConsumer)
 	ctc.putBatch(batch, nil)
 
 	assert.EqualValues(t, md, <-ctc.consume)
@@ -349,7 +366,7 @@ func TestReceiverRecvError(t *testing.T) {
 	tc := healthyTestChannel{}
 	ctc := newCommonTestCase(t, tc)
 
-	ctc.start()
+	ctc.start(ctc.newRealConsumer)
 
 	ctc.putBatch(nil, fmt.Errorf("test recv error"))
 
@@ -366,10 +383,9 @@ func TestReceiverSendError(t *testing.T) {
 	batch, err := ctc.testProducer.BatchArrowRecordsFromLogs(ld)
 	require.NoError(t, err)
 
-	ctc.arrowConsumer.EXPECT().LogsFrom(batch).Times(1).Return([]plog.Logs{ld}, nil)
 	ctc.stream.EXPECT().Send(statusOKFor(batch.BatchId)).Times(1).Return(fmt.Errorf("test send error"))
 
-	ctc.start()
+	ctc.start(ctc.newRealConsumer)
 	ctc.putBatch(batch, nil)
 
 	assert.EqualValues(t, ld, <-ctc.consume)
@@ -387,10 +403,9 @@ func TestReceiverConsumeError(t *testing.T) {
 	batch, err := ctc.testProducer.BatchArrowRecordsFromTraces(td)
 	require.NoError(t, err)
 
-	ctc.arrowConsumer.EXPECT().TracesFrom(batch).Times(1).Return([]ptrace.Traces{td}, nil)
 	ctc.stream.EXPECT().Send(statusUnavailableFor(batch.BatchId, "consumer unhealthy")).Times(1).Return(nil)
 
-	ctc.start()
+	ctc.start(ctc.newRealConsumer)
 
 	ctc.putBatch(batch, nil)
 	assert.EqualValues(t, td, <-ctc.consume)
@@ -408,10 +423,9 @@ func TestReceiverInvalidData(t *testing.T) {
 	batch, err := ctc.testProducer.BatchArrowRecordsFromTraces(td)
 	require.NoError(t, err)
 
-	ctc.arrowConsumer.EXPECT().TracesFrom(batch).Times(1).Return(nil, fmt.Errorf("test invalid error"))
 	ctc.stream.EXPECT().Send(statusInvalidFor(batch.BatchId, "Permanent error: test invalid error")).Times(1).Return(nil)
 
-	ctc.start()
+	ctc.start(ctc.newErrorConsumer)
 	ctc.putBatch(batch, nil)
 
 	err = ctc.cancelAndWait()
@@ -423,31 +437,36 @@ func TestReceiverEOF(t *testing.T) {
 	tc := healthyTestChannel{}
 	ctc := newCommonTestCase(t, tc)
 
-	td := testdata.GenerateTraces(2)
-	batch, err := ctc.testProducer.BatchArrowRecordsFromTraces(td)
-	require.NoError(t, err)
-
 	// send a sequence of data then simulate closing the connection.
 	const times = 10
 
-	ctc.arrowConsumer.EXPECT().TracesFrom(batch).Times(times).Return([]ptrace.Traces{td}, nil)
-	ctc.stream.EXPECT().Send(statusOKFor(batch.BatchId)).Times(times).Return(nil)
+	var actualData []ptrace.Traces
+	var expectData []ptrace.Traces
 
-	ctc.start()
+	ctc.stream.EXPECT().Send(gomock.Any()).Times(times).Return(nil)
+
+	ctc.start(ctc.newRealConsumer)
 
 	go func() {
 		for i := 0; i < times; i++ {
+			td := testdata.GenerateTraces(2)
+			expectData = append(expectData, td)
+
+			batch, err := ctc.testProducer.BatchArrowRecordsFromTraces(td)
+			require.NoError(t, err)
+
 			ctc.putBatch(batch, nil)
 		}
-
 		close(ctc.receive)
 	}()
 
 	for i := 0; i < times; i++ {
-		assert.EqualValues(t, td, <-ctc.consume)
+		actualData = append(actualData, (<-ctc.consume).(ptrace.Traces))
 	}
 
-	err = ctc.wait()
+	assert.EqualValues(t, expectData, actualData)
+
+	err := ctc.wait()
 	require.Error(t, err)
 	require.True(t, errors.Is(err, io.EOF))
 }

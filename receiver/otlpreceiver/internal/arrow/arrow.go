@@ -20,6 +20,7 @@ import (
 
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
 	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
+	"go.uber.org/zap"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config"
@@ -49,8 +50,9 @@ type Receiver struct {
 	Consumers
 	arrowpb.UnimplementedArrowStreamServiceServer
 
-	obsrecv       *obsreport.Receiver
-	arrowConsumer arrowRecord.ConsumerAPI
+	telemetry   component.TelemetrySettings
+	obsrecv     *obsreport.Receiver
+	newConsumer func() arrowRecord.ConsumerAPI
 }
 
 // New creates a new Receiver reference.
@@ -58,7 +60,7 @@ func New(
 	id config.ComponentID,
 	cs Consumers,
 	set component.ReceiverCreateSettings,
-	ac arrowRecord.ConsumerAPI,
+	newConsumer func() arrowRecord.ConsumerAPI,
 ) *Receiver {
 	obs := obsreport.NewReceiver(obsreport.ReceiverSettings{
 		ReceiverID:             id,
@@ -66,14 +68,21 @@ func New(
 		ReceiverCreateSettings: set,
 	})
 	return &Receiver{
-		Consumers:     cs,
-		obsrecv:       obs,
-		arrowConsumer: ac,
+		Consumers:   cs,
+		obsrecv:     obs,
+		telemetry:   set.TelemetrySettings,
+		newConsumer: newConsumer,
 	}
 }
 
 func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStreamServer) error {
 	ctx := serverStream.Context()
+	ac := r.newConsumer()
+	defer func() {
+		if err := ac.Close(); err != nil {
+			r.telemetry.Logger.Error("arrow stream close", zap.Error(err))
+		}
+	}()
 
 	for {
 		// See if the context has been canceled.
@@ -91,7 +100,7 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStre
 
 		// Process records: an error in this code path does
 		// not necessarily break the stream.
-		err = r.processRecords(ctx, req)
+		err = r.processRecords(ctx, ac, req)
 
 		// Note: Statuses can be batched: TODO: should we?
 		resp := &arrowpb.BatchStatus{}
@@ -123,7 +132,7 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStre
 // the error (true) was from processing the data (i.e., invalid
 // argument) or (false) from the consuming pipeline.  The boolean is
 // not used when success (nil error) is returned.
-func (r *Receiver) processRecords(ctx context.Context, records *arrowpb.BatchArrowRecords) error {
+func (r *Receiver) processRecords(ctx context.Context, arrowConsumer arrowRecord.ConsumerAPI, records *arrowpb.BatchArrowRecords) error {
 	payloads := records.GetOtlpArrowPayloads()
 	if len(payloads) == 0 {
 		return nil
@@ -131,7 +140,7 @@ func (r *Receiver) processRecords(ctx context.Context, records *arrowpb.BatchArr
 	// TODO: Use the obsreport object to instrument (somehow)
 	switch payloads[0].Type {
 	case arrowpb.OtlpArrowPayloadType_METRICS:
-		otlp, err := r.arrowConsumer.MetricsFrom(records)
+		otlp, err := arrowConsumer.MetricsFrom(records)
 		if err != nil {
 			return consumererror.NewPermanent(err)
 		}
@@ -143,7 +152,7 @@ func (r *Receiver) processRecords(ctx context.Context, records *arrowpb.BatchArr
 		}
 
 	case arrowpb.OtlpArrowPayloadType_LOGS:
-		otlp, err := r.arrowConsumer.LogsFrom(records)
+		otlp, err := arrowConsumer.LogsFrom(records)
 		if err != nil {
 			return consumererror.NewPermanent(err)
 		}
@@ -156,7 +165,7 @@ func (r *Receiver) processRecords(ctx context.Context, records *arrowpb.BatchArr
 		}
 
 	case arrowpb.OtlpArrowPayloadType_SPANS:
-		otlp, err := r.arrowConsumer.TracesFrom(records)
+		otlp, err := arrowConsumer.TracesFrom(records)
 		if err != nil {
 			return consumererror.NewPermanent(err)
 		}

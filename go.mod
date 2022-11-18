@@ -5,7 +5,7 @@ go 1.18
 require (
 	contrib.go.opencensus.io/exporter/prometheus v0.4.2
 	github.com/cenkalti/backoff/v4 v4.1.3
-	github.com/f5/otel-arrow-adapter v0.0.0-20221116234146-d8ecadf9751b
+	github.com/f5/otel-arrow-adapter v0.0.0-20221117192416-4be8d64bf483
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/mock v1.6.0
 	github.com/golang/snappy v0.0.4
