@@ -26,7 +26,7 @@ type Settings struct {
 // Validate returns an error when the number of streams is less than 1.
 func (cfg *Settings) Validate() error {
 	if cfg.NumStreams < 1 {
-		return fmt.Errorf("stream count should be > 0: %d", cfg.NumStreams)
+		return fmt.Errorf("stream count must be > 0: %d", cfg.NumStreams)
 	}
 
 	return nil
