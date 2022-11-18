@@ -47,6 +47,7 @@ type streamTestCase struct {
 	fromMetricsCall *gomock.Call
 	fromLogsCall    *gomock.Call
 	stream          *Stream
+	wait            sync.WaitGroup
 }
 
 func newStreamTestCase(t *testing.T) *streamTestCase {
@@ -81,21 +82,26 @@ func newStreamTestCase(t *testing.T) *streamTestCase {
 }
 
 // start runs a test stream according to the behavior of testChannel.
-func (tc *streamTestCase) start(channel testChannel) func() {
+func (tc *streamTestCase) start(channel testChannel) {
 	tc.streamCall.Times(1).DoAndReturn(tc.connectTestStream(channel))
 
-	var wait sync.WaitGroup
-	wait.Add(1)
+	tc.wait.Add(1)
 
 	go func() {
-		defer wait.Done()
+		defer tc.wait.Done()
 		tc.stream.run(tc.bgctx, tc.serviceClient, nil)
 	}()
+}
 
-	return func() {
-		tc.bgcancel()
-		wait.Wait()
-	}
+// cancelAndWait cancels the context and waits for the runner to return.
+func (tc *streamTestCase) cancelAndWaitForShutdown() {
+	tc.bgcancel()
+	tc.wait.Wait()
+}
+
+// cancel waits for the runner to exit without canceling the context.
+func (tc *streamTestCase) waitForShutdown() {
+	tc.wait.Wait()
 }
 
 // connectTestStream returns the stream under test from the common test's mock ArrowStream().
@@ -129,8 +135,8 @@ func TestStreamEncodeError(t *testing.T) {
 	testErr := fmt.Errorf("test encode error")
 	tc.fromTracesCall.Times(1).Return(nil, testErr)
 
-	cleanup := tc.start(newHealthyTestChannel())
-	defer cleanup()
+	tc.start(newHealthyTestChannel())
+	defer tc.cancelAndWaitForShutdown()
 
 	// sender should get a permanent testErr
 	err := (<-tc.prioritizer.readyChannel()).SendAndWait(tc.bgctx, twoTraces)
@@ -146,18 +152,87 @@ func TestStreamUnknownBatchError(t *testing.T) {
 
 	tc.fromTracesCall.Times(1).Return(oneBatch, nil)
 
-	channel := newUnknownBatchIDTestChannel()
-	cleanup := tc.start(channel)
-	defer cleanup()
+	channel := newHealthyTestChannel()
+	tc.start(channel)
+	defer tc.cancelAndWaitForShutdown()
 
+	var wg sync.WaitGroup
+	wg.Add(1)
+	defer wg.Wait()
 	go func() {
-		time.Sleep(200 * time.Millisecond)
-		channel.unblock()
+		defer wg.Done()
+		<-channel.sent
+		channel.recv <- statusOKFor("unknown")
 	}()
 	// sender should get ErrStreamRestarting
 	err := tc.get().SendAndWait(tc.bgctx, twoTraces)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrStreamRestarting))
+}
+
+// TestStreamStatusUnavailableInvalid verifies that the stream reader handles
+// an unavailable or invalid status w/o breaking the stream.
+func TestStreamStatusUnavailableInvalid(t *testing.T) {
+	tc := newStreamTestCase(t)
+
+	tc.fromTracesCall.Times(3).Return(oneBatch, nil)
+
+	channel := newHealthyTestChannel()
+	tc.start(channel)
+	defer tc.cancelAndWaitForShutdown()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	defer wg.Wait()
+	go func() {
+		defer wg.Done()
+		batch := <-channel.sent
+		channel.recv <- statusUnavailableFor(batch.BatchId)
+		batch = <-channel.sent
+		channel.recv <- statusInvalidFor(batch.BatchId)
+		batch = <-channel.sent
+		channel.recv <- statusOKFor(batch.BatchId)
+	}()
+	// sender should get "test unavailable" once, success second time.
+	err := tc.get().SendAndWait(tc.bgctx, twoTraces)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "test unavailable")
+
+	err = tc.get().SendAndWait(tc.bgctx, twoTraces)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "test invalid")
+
+	err = tc.get().SendAndWait(tc.bgctx, twoTraces)
+	require.NoError(t, err)
+}
+
+// TestStreamStatusUnrecognized verifies that the stream reader handles
+// an unrecognized status by breaking the stream.
+func TestStreamStatusUnrecognized(t *testing.T) {
+	tc := newStreamTestCase(t)
+
+	tc.fromTracesCall.Times(1).Return(oneBatch, nil)
+
+	channel := newHealthyTestChannel()
+	tc.start(channel)
+	defer tc.cancelAndWaitForShutdown()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	defer wg.Wait()
+	go func() {
+		defer wg.Done()
+		batch := <-channel.sent
+		channel.recv <- statusUnrecognizedFor(batch.BatchId)
+	}()
+	// sender should get "test unavailable" once, success second time.
+	err := tc.get().SendAndWait(tc.bgctx, twoTraces)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "test unrecognized")
+
+	// Note: do not cancel the context, the stream should be
+	// shutting down due to the error.
+	tc.waitForShutdown()
 }
 
 // TestStreamSendError verifies that the stream reader handles a
@@ -168,8 +243,8 @@ func TestStreamSendError(t *testing.T) {
 	tc.fromTracesCall.Times(1).Return(oneBatch, nil)
 
 	channel := newSendErrorTestChannel()
-	cleanup := tc.start(channel)
-	defer cleanup()
+	tc.start(channel)
+	defer tc.cancelAndWaitForShutdown()
 
 	go func() {
 		time.Sleep(200 * time.Millisecond)
