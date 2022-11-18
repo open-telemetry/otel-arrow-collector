@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/apache/arrow/go/v10 v10.0.0
-	github.com/f5/otel-arrow-adapter v0.0.0-20221116234146-d8ecadf9751b
+	github.com/f5/otel-arrow-adapter v0.0.0-20221117192416-4be8d64bf483
 	github.com/golang/mock v1.6.0
 	github.com/stretchr/testify v1.8.1
 	go.opentelemetry.io/collector v0.63.1
