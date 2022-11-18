@@ -24,6 +24,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/consumer"
+	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/obsreport"
 )
 
@@ -90,7 +91,7 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStre
 
 		// Process records: an error in this code path does
 		// not necessarily break the stream.
-		invalid, err := r.processRecords(ctx, req)
+		err = r.processRecords(ctx, req)
 
 		// Note: Statuses can be batched: TODO: should we?
 		resp := &arrowpb.BatchStatus{}
@@ -103,7 +104,7 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStre
 			status.StatusCode = arrowpb.StatusCode_ERROR
 			status.ErrorMessage = err.Error()
 
-			if invalid {
+			if consumererror.IsPermanent(err) {
 				status.ErrorCode = arrowpb.ErrorCode_INVALID_ARGUMENT
 			} else {
 				status.ErrorCode = arrowpb.ErrorCode_UNAVAILABLE
@@ -122,53 +123,53 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStre
 // the error (true) was from processing the data (i.e., invalid
 // argument) or (false) from the consuming pipeline.  The boolean is
 // not used when success (nil error) is returned.
-func (r *Receiver) processRecords(ctx context.Context, records *arrowpb.BatchArrowRecords) (invalid bool, _ error) {
+func (r *Receiver) processRecords(ctx context.Context, records *arrowpb.BatchArrowRecords) error {
 	payloads := records.GetOtlpArrowPayloads()
 	if len(payloads) == 0 {
-		return false, nil
+		return nil
 	}
 	// TODO: Use the obsreport object to instrument (somehow)
 	switch payloads[0].Type {
 	case arrowpb.OtlpArrowPayloadType_METRICS:
 		otlp, err := r.arrowConsumer.MetricsFrom(records)
 		if err != nil {
-			return true, err
+			return consumererror.NewPermanent(err)
 		}
 		for _, logs := range otlp {
 			err = r.Metrics().ConsumeMetrics(ctx, logs)
 			if err != nil {
-				return false, err
+				return err
 			}
 		}
 
 	case arrowpb.OtlpArrowPayloadType_LOGS:
 		otlp, err := r.arrowConsumer.LogsFrom(records)
 		if err != nil {
-			return true, err
+			return consumererror.NewPermanent(err)
 		}
 
 		for _, logs := range otlp {
 			err = r.Logs().ConsumeLogs(ctx, logs)
 			if err != nil {
-				return false, err
+				return err
 			}
 		}
 
 	case arrowpb.OtlpArrowPayloadType_SPANS:
 		otlp, err := r.arrowConsumer.TracesFrom(records)
 		if err != nil {
-			return true, err
+			return consumererror.NewPermanent(err)
 		}
 
 		for _, traces := range otlp {
 			err = r.Traces().ConsumeTraces(ctx, traces)
 			if err != nil {
-				return false, err
+				return err
 			}
 		}
 
 	default:
-		return true, ErrUnrecognizedPayload
+		return ErrUnrecognizedPayload
 	}
-	return false, nil
+	return nil
 }

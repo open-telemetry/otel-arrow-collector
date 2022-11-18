@@ -409,7 +409,7 @@ func TestReceiverInvalidData(t *testing.T) {
 	require.NoError(t, err)
 
 	ctc.arrowConsumer.EXPECT().TracesFrom(batch).Times(1).Return(nil, fmt.Errorf("test invalid error"))
-	ctc.stream.EXPECT().Send(statusInvalidFor(batch.BatchId, "test invalid error")).Times(1).Return(nil)
+	ctc.stream.EXPECT().Send(statusInvalidFor(batch.BatchId, "Permanent error: test invalid error")).Times(1).Return(nil)
 
 	ctc.start()
 	ctc.putBatch(batch, nil)
