@@ -17,10 +17,20 @@ package arrow
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
+	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
+	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
+	arrowRecordMock "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record/mock"
+	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/require"
+
+	"go.opentelemetry.io/collector/internal/testdata"
+	"go.opentelemetry.io/collector/pdata/plog"
+	"go.opentelemetry.io/collector/pdata/pmetric"
+	"go.opentelemetry.io/collector/pdata/ptrace"
 )
 
 type exporterTestCase struct {
@@ -30,7 +40,20 @@ type exporterTestCase struct {
 
 func newExporterTestCase(t *testing.T, noisy noisyTest, arrowset Settings) *exporterTestCase {
 	ctc := newCommonTestCase(t, noisy)
-	exp := NewExporter(arrowset, ctc.telset, ctc.serviceClient, nil)
+	exp := NewExporter(arrowset, func() arrowRecord.ProducerAPI {
+		// Mock the close function, use a real producer for testing dataflow.
+		prod := arrowRecordMock.NewMockProducerAPI(ctc.ctrl)
+		real := arrowRecord.NewProducer()
+
+		prod.EXPECT().BatchArrowRecordsFromTraces(gomock.Any()).AnyTimes().DoAndReturn(
+			real.BatchArrowRecordsFromTraces)
+		prod.EXPECT().BatchArrowRecordsFromLogs(gomock.Any()).AnyTimes().DoAndReturn(
+			real.BatchArrowRecordsFromLogs)
+		prod.EXPECT().BatchArrowRecordsFromMetrics(gomock.Any()).AnyTimes().DoAndReturn(
+			real.BatchArrowRecordsFromMetrics)
+		prod.EXPECT().Close().Times(1).Return(nil)
+		return prod
+	}, ctc.telset, ctc.serviceClient, nil)
 
 	return &exporterTestCase{
 		commonTestCase: ctc,
@@ -38,11 +61,22 @@ func newExporterTestCase(t *testing.T, noisy noisyTest, arrowset Settings) *expo
 	}
 }
 
+func statusOKFor(id string) *arrowpb.BatchStatus {
+	return &arrowpb.BatchStatus{
+		Statuses: []*arrowpb.StatusMessage{
+			{
+				BatchId:    id,
+				StatusCode: arrowpb.StatusCode_OK,
+			},
+		},
+	}
+}
+
 // TestArrowExporterSuccess tests a single Send through a healthy channel.
 func TestArrowExporterSuccess(t *testing.T) {
-	for _, data := range []interface{}{twoTraces, twoMetrics, twoLogs} {
+	for _, inputData := range []interface{}{twoTraces, twoMetrics, twoLogs} {
 		tc := newExporterTestCase(t, NotNoisy, singleStreamSettings)
-		channel := newHealthyTestChannel(1)
+		channel := newHealthyTestChannel()
 
 		tc.streamCall.Times(1).DoAndReturn(tc.returnNewStream(channel))
 
@@ -52,7 +86,34 @@ func TestArrowExporterSuccess(t *testing.T) {
 		consumer, err := tc.exporter.GetStream(ctx)
 		require.NoError(t, err)
 
-		require.NoError(t, consumer.SendAndWait(ctx, data))
+		var wg sync.WaitGroup
+		var outputData *arrowpb.BatchArrowRecords
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			outputData = <-channel.sent
+			channel.recv <- statusOKFor(outputData.BatchId)
+		}()
+
+		require.NoError(t, consumer.SendAndWait(ctx, inputData))
+
+		wg.Wait()
+
+		testCon := arrowRecord.NewConsumer()
+		switch testData := inputData.(type) {
+		case ptrace.Traces:
+			traces, err := testCon.TracesFrom(outputData)
+			require.NoError(t, err)
+			require.Equal(t, []ptrace.Traces{testData}, traces)
+		case plog.Logs:
+			logs, err := testCon.LogsFrom(outputData)
+			require.NoError(t, err)
+			require.Equal(t, []plog.Logs{testData}, logs)
+		case pmetric.Metrics:
+			metrics, err := testCon.MetricsFrom(outputData)
+			require.NoError(t, err)
+			require.Equal(t, []pmetric.Metrics{testData}, metrics)
+		}
 
 		require.NoError(t, tc.exporter.Shutdown(ctx))
 	}
@@ -132,7 +193,7 @@ func TestArrowExporterConnectTimeout(t *testing.T) {
 func TestArrowExporterStreamFailure(t *testing.T) {
 	tc := newExporterTestCase(t, NotNoisy, singleStreamSettings)
 	channel0 := newUnresponsiveTestChannel()
-	channel1 := newHealthyTestChannel(1)
+	channel1 := newHealthyTestChannel()
 
 	tc.streamCall.AnyTimes().DoAndReturn(tc.returnNewStream(channel0, channel1))
 
@@ -142,6 +203,15 @@ func TestArrowExporterStreamFailure(t *testing.T) {
 	go func() {
 		time.Sleep(200 * time.Millisecond)
 		channel0.unblock()
+	}()
+
+	var wg sync.WaitGroup
+	var outputData *arrowpb.BatchArrowRecords
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		outputData = <-channel1.sent
+		channel1.recv <- statusOKFor(outputData.BatchId)
 	}()
 
 	for times := 0; times < 2; times++ {
@@ -158,6 +228,7 @@ func TestArrowExporterStreamFailure(t *testing.T) {
 			require.NoError(t, err)
 		}
 	}
+	wg.Wait()
 
 	require.NoError(t, tc.exporter.Shutdown(bg))
 }
@@ -191,5 +262,52 @@ func TestArrowExporterStreamRace(t *testing.T) {
 		require.True(t, errors.Is(err, ErrStreamRestarting))
 	}
 
+	require.NoError(t, tc.exporter.Shutdown(bg))
+}
+
+// TestArrowExporterStreaming tests 10 sends in a row.
+func TestArrowExporterStreaming(t *testing.T) {
+	tc := newExporterTestCase(t, NotNoisy, singleStreamSettings)
+	channel := newHealthyTestChannel()
+
+	tc.streamCall.AnyTimes().DoAndReturn(tc.returnNewStream(channel))
+
+	bg := context.Background()
+	require.NoError(t, tc.exporter.Start(bg))
+
+	var expectOutput []ptrace.Traces
+	var actualOutput []ptrace.Traces
+	testCon := arrowRecord.NewConsumer()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for data := range channel.sent {
+			traces, err := testCon.TracesFrom(data)
+			require.NoError(t, err)
+			require.Equal(t, 1, len(traces))
+			actualOutput = append(actualOutput, traces[0])
+			channel.recv <- statusOKFor(data.BatchId)
+		}
+	}()
+
+	for times := 0; times < 10; times++ {
+		stream, err := tc.exporter.GetStream(bg)
+		require.NotNil(t, stream)
+		require.NoError(t, err)
+
+		input := testdata.GenerateTraces(2)
+		expectOutput = append(expectOutput, input)
+
+		err = stream.SendAndWait(bg, input)
+		require.NoError(t, err)
+	}
+	// Stop the test conduit started above.  If the sender were
+	// still sending, it would panic on a closed channel.
+	close(channel.sent)
+	wg.Wait()
+
+	require.Equal(t, expectOutput, actualOutput)
 	require.NoError(t, tc.exporter.Shutdown(bg))
 }
