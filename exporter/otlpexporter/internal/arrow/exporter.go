@@ -20,6 +20,7 @@ import (
 
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
 	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"go.opentelemetry.io/collector/component"
@@ -33,6 +34,9 @@ import (
 type Exporter struct {
 	// settings contains Arrow-specific parameters.
 	settings Settings
+
+	// newProducer returns a real (or mock) Producer.
+	newProducer func() arrowRecord.ProducerAPI
 
 	// telemetry includes logger, tracer, meter.
 	telemetry component.TelemetrySettings
@@ -71,12 +75,14 @@ type Exporter struct {
 // NewExporter configures a new Exporter.
 func NewExporter(
 	settings Settings,
+	newProducer func() arrowRecord.ProducerAPI,
 	telemetry component.TelemetrySettings,
 	client arrowpb.ArrowStreamServiceClient,
 	grpcOptions []grpc.CallOption,
 ) *Exporter {
 	return &Exporter{
 		settings:    settings,
+		newProducer: newProducer,
 		telemetry:   telemetry,
 		client:      client,
 		grpcOptions: grpcOptions,
@@ -148,9 +154,13 @@ func (e *Exporter) runStreamController(bgctx context.Context) {
 // to call writeStream() and performs readStream() itself.  When the stream shuts
 // down this call synchronously waits for and unblocks the consumers.
 func (e *Exporter) runArrowStream(ctx context.Context) {
-	stream := newStream(arrowRecord.NewProducer(), e.ready, e.telemetry)
+	producer := e.newProducer()
+	stream := newStream(producer, e.ready, e.telemetry)
 
 	defer func() {
+		if err := producer.Close(); err != nil {
+			e.telemetry.Logger.Error("arrow producer close:", zap.Error(err))
+		}
 		e.wg.Done()
 		e.returning <- stream
 	}()
