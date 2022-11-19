@@ -396,41 +396,77 @@ func TestReceiverSendError(t *testing.T) {
 }
 
 func TestReceiverConsumeError(t *testing.T) {
-	tc := unhealthyTestChannel{}
-	ctc := newCommonTestCase(t, tc)
+	data := []interface{}{
+		testdata.GenerateTraces(2),
+		testdata.GenerateMetrics(2),
+		testdata.GenerateLogs(2),
+	}
 
-	td := testdata.GenerateTraces(2)
-	batch, err := ctc.testProducer.BatchArrowRecordsFromTraces(td)
-	require.NoError(t, err)
+	for _, item := range data {
+		tc := unhealthyTestChannel{}
+		ctc := newCommonTestCase(t, tc)
 
-	ctc.stream.EXPECT().Send(statusUnavailableFor(batch.BatchId, "consumer unhealthy")).Times(1).Return(nil)
+		var batch *arrowpb.BatchArrowRecords
+		var err error
+		switch input := item.(type) {
+		case ptrace.Traces:
+			batch, err = ctc.testProducer.BatchArrowRecordsFromTraces(input)
+		case plog.Logs:
+			batch, err = ctc.testProducer.BatchArrowRecordsFromLogs(input)
+		case pmetric.Metrics:
+			batch, err = ctc.testProducer.BatchArrowRecordsFromMetrics(input)
+		default:
+			panic(input)
+		}
+		require.NoError(t, err)
 
-	ctc.start(ctc.newRealConsumer)
+		ctc.stream.EXPECT().Send(statusUnavailableFor(batch.BatchId, "consumer unhealthy")).Times(1).Return(nil)
 
-	ctc.putBatch(batch, nil)
-	assert.EqualValues(t, td, <-ctc.consume)
+		ctc.start(ctc.newRealConsumer)
 
-	err = ctc.cancelAndWait()
-	require.Error(t, err)
-	require.True(t, errors.Is(err, context.Canceled), "for %v", err)
+		ctc.putBatch(batch, nil)
+		require.Equal(t, item, <-ctc.consume)
+
+		err = ctc.cancelAndWait()
+		require.Error(t, err)
+		require.True(t, errors.Is(err, context.Canceled), "for %v", err)
+	}
 }
 
 func TestReceiverInvalidData(t *testing.T) {
-	tc := unhealthyTestChannel{}
-	ctc := newCommonTestCase(t, tc)
+	data := []interface{}{
+		testdata.GenerateTraces(2),
+		testdata.GenerateMetrics(2),
+		testdata.GenerateLogs(2),
+	}
 
-	td := testdata.GenerateTraces(2)
-	batch, err := ctc.testProducer.BatchArrowRecordsFromTraces(td)
-	require.NoError(t, err)
+	for _, item := range data {
+		tc := unhealthyTestChannel{}
+		ctc := newCommonTestCase(t, tc)
 
-	ctc.stream.EXPECT().Send(statusInvalidFor(batch.BatchId, "Permanent error: test invalid error")).Times(1).Return(nil)
+		var batch *arrowpb.BatchArrowRecords
+		var err error
+		switch input := item.(type) {
+		case ptrace.Traces:
+			batch, err = ctc.testProducer.BatchArrowRecordsFromTraces(input)
+		case plog.Logs:
+			batch, err = ctc.testProducer.BatchArrowRecordsFromLogs(input)
+		case pmetric.Metrics:
+			batch, err = ctc.testProducer.BatchArrowRecordsFromMetrics(input)
+		default:
+			panic(input)
+		}
+		require.NoError(t, err)
 
-	ctc.start(ctc.newErrorConsumer)
-	ctc.putBatch(batch, nil)
+		ctc.stream.EXPECT().Send(statusInvalidFor(batch.BatchId, "Permanent error: test invalid error")).Times(1).Return(nil)
 
-	err = ctc.cancelAndWait()
-	require.Error(t, err)
-	require.True(t, errors.Is(err, context.Canceled), "for %v", err)
+		ctc.start(ctc.newErrorConsumer)
+		ctc.putBatch(batch, nil)
+
+		err = ctc.cancelAndWait()
+		require.Error(t, err)
+		require.True(t, errors.Is(err, context.Canceled), "for %v", err)
+	}
 }
 
 func TestReceiverEOF(t *testing.T) {
@@ -469,4 +505,16 @@ func TestReceiverEOF(t *testing.T) {
 	err := ctc.wait()
 	require.Error(t, err)
 	require.True(t, errors.Is(err, io.EOF))
+}
+
+func TestReceiverCancel(t *testing.T) {
+	tc := healthyTestChannel{}
+	ctc := newCommonTestCase(t, tc)
+
+	ctc.cancel()
+	ctc.start(ctc.newRealConsumer)
+
+	err := ctc.wait()
+	require.Error(t, err)
+	require.True(t, errors.Is(err, context.Canceled))
 }
