@@ -72,6 +72,45 @@ func statusOKFor(id string) *arrowpb.BatchStatus {
 	}
 }
 
+func statusUnavailableFor(id string) *arrowpb.BatchStatus {
+	return &arrowpb.BatchStatus{
+		Statuses: []*arrowpb.StatusMessage{
+			{
+				BatchId:      id,
+				StatusCode:   arrowpb.StatusCode_ERROR,
+				ErrorCode:    arrowpb.ErrorCode_UNAVAILABLE,
+				ErrorMessage: "test unavailable",
+			},
+		},
+	}
+}
+
+func statusInvalidFor(id string) *arrowpb.BatchStatus {
+	return &arrowpb.BatchStatus{
+		Statuses: []*arrowpb.StatusMessage{
+			{
+				BatchId:      id,
+				StatusCode:   arrowpb.StatusCode_ERROR,
+				ErrorCode:    arrowpb.ErrorCode_INVALID_ARGUMENT,
+				ErrorMessage: "test invalid",
+			},
+		},
+	}
+}
+
+func statusUnrecognizedFor(id string) *arrowpb.BatchStatus {
+	return &arrowpb.BatchStatus{
+		Statuses: []*arrowpb.StatusMessage{
+			{
+				BatchId:      id,
+				StatusCode:   arrowpb.StatusCode_ERROR,
+				ErrorCode:    1 << 20,
+				ErrorMessage: "test unrecognized",
+			},
+		},
+	}
+}
+
 // TestArrowExporterSuccess tests a single Send through a healthy channel.
 func TestArrowExporterSuccess(t *testing.T) {
 	for _, inputData := range []interface{}{twoTraces, twoMetrics, twoLogs} {
