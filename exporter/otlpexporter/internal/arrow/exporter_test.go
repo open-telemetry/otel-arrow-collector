@@ -197,6 +197,7 @@ func TestArrowExporterStreamConnectError(t *testing.T) {
 
 	require.NoError(t, tc.exporter.Shutdown(bg))
 
+	require.Less(t, 0, len(tc.observedLogs.All()), "should have at least one log: %v", tc.observedLogs.All())
 	require.Equal(t, tc.observedLogs.All()[0].Message, "cannot start arrow stream")
 }
 
@@ -218,6 +219,7 @@ func TestArrowExporterDowngrade(t *testing.T) {
 
 	require.NoError(t, tc.exporter.Shutdown(bg))
 
+	require.Less(t, 1, len(tc.observedLogs.All()), "should have at least two logs: %v", tc.observedLogs.All())
 	require.Equal(t, tc.observedLogs.All()[0].Message, "arrow is not supported")
 	require.Contains(t, tc.observedLogs.All()[1].Message, "downgrading")
 }
@@ -311,8 +313,10 @@ func TestArrowExporterStreamRace(t *testing.T) {
 
 	callctx, cancel := context.WithCancel(bg)
 
-	// One goroutine will cancel the context in a while
-	// Goroutines will wait for the timeout.
+	// These goroutines will repeatedly try for an available
+	// stream, but none will become available.  Eventually the
+	// context will be canceled and cause these goroutines to
+	// return.
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
 		go func() {

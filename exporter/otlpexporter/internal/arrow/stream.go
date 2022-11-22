@@ -124,7 +124,7 @@ func (s *Stream) run(bgctx context.Context, client arrowpb.ArrowStreamServiceCli
 	}
 	// Setting .client != nil indicates that the endpoint was valid,
 	// streaming may start.  When this stream finishes, it will be
-	// restartd.
+	// restarted.
 	s.client = sc
 
 	// ww is used to wait for the writer.  Since we wait for the writer,
@@ -163,6 +163,7 @@ func (s *Stream) run(bgctx context.Context, client arrowpb.ArrowStreamServiceCli
 			s.client = nil
 			s.telemetry.Logger.Info("arrow is not supported", zap.Error(err))
 		} else if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
+			// TODO: Should we add debug-level logs for EOF and Canceled?
 			s.telemetry.Logger.Error("arrow recv", zap.Error(err))
 		}
 	}
@@ -216,6 +217,7 @@ func (s *Stream) write(ctx context.Context) {
 
 		if err := s.client.Send(batch); err != nil {
 			// The error will be sent to errCh during cleanup for this stream.
+			// TODO: Should we add debug-level logs for EOF and Canceled?
 			if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
 				s.telemetry.Logger.Error("arrow send", zap.Error(err))
 			}

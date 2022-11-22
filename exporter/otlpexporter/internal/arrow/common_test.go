@@ -66,15 +66,13 @@ type noisyTest bool
 const Noisy noisyTest = true
 const NotNoisy noisyTest = false
 
-func newTestTelemetry(t *testing.T, noisy noisyTest) (_ component.TelemetrySettings, obslogs *observer.ObservedLogs) {
+func newTestTelemetry(t *testing.T, noisy noisyTest) (component.TelemetrySettings, *observer.ObservedLogs) {
 	telset := componenttest.NewNopTelemetrySettings()
-	if !noisy {
-		var core zapcore.Core
-		core, obslogs = observer.New(zapcore.DebugLevel)
-
-		telset.Logger = zap.New(zapcore.NewTee(core, zaptest.NewLogger(t).Core()))
-
+	if noisy {
+		return telset, nil
 	}
+	core, obslogs := observer.New(zapcore.DebugLevel)
+	telset.Logger = zap.New(zapcore.NewTee(core, zaptest.NewLogger(t).Core()))
 	return telset, obslogs
 }
 
