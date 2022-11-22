@@ -225,7 +225,6 @@ func TestStreamStatusUnrecognized(t *testing.T) {
 		batch := <-channel.sent
 		channel.recv <- statusUnrecognizedFor(batch.BatchId)
 	}()
-	// sender should get "test unavailable" once, success second time.
 	err := tc.get().SendAndWait(tc.bgctx, twoTraces)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "test unrecognized")
@@ -233,6 +232,25 @@ func TestStreamStatusUnrecognized(t *testing.T) {
 	// Note: do not cancel the context, the stream should be
 	// shutting down due to the error.
 	tc.waitForShutdown()
+}
+
+// TestStreamUnsupported verifies that the stream signals downgrade
+// when an Unsupported code is received, which is how the gRPC client
+// responds when the server does not support arrow.
+func TestStreamUnsupported(t *testing.T) {
+	tc := newStreamTestCase(t)
+
+	channel := newArrowUnsupportedTestChannel()
+	tc.start(channel)
+	defer tc.cancelAndWaitForShutdown()
+
+	err := tc.get().SendAndWait(tc.bgctx, twoTraces)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrStreamRestarting))
+
+	tc.waitForShutdown()
+
+	require.Equal(t, tc.observedLogs.All()[0].Message, "arrow is not supported")
 }
 
 // TestStreamSendError verifies that the stream reader handles a

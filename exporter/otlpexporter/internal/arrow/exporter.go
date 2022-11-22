@@ -16,6 +16,7 @@ package arrow // import "go.opentelemetry.io/collector/exporter/otlpexporter/int
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
@@ -138,7 +139,7 @@ func (e *Exporter) runStreamController(bgctx context.Context) {
 			// None of the streams were able to connect to
 			// an Arrow endpoint.
 			if running == 0 {
-				e.telemetry.Logger.Info("failed to establish OTLP+Arrow streaming, downgrading")
+				e.telemetry.Logger.Info("could not establish arrow streams, downgrading to standard OTLP export")
 				e.ready.downgrade()
 			}
 
@@ -168,13 +169,39 @@ func (e *Exporter) runArrowStream(ctx context.Context) {
 	stream.run(ctx, e.client, e.grpcOptions)
 }
 
-// GetStream is called to get an available stream with the user's pipeline context.
-func (e *Exporter) GetStream(ctx context.Context) (*Stream, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case stream := <-e.ready.readyChannel():
-		return stream, nil
+// SendAndWait tries to send using an Arrow stream.  The results are:
+//
+// (true, nil):      Arrow send: success at consumer
+// (false, nil):     Arrow is not supported by the server, caller expected to fallback.
+// (true, non-nil):  Arrow send: server response may be permanent or allow retry.
+// (false, non-nil): Context timeout prevents retry.
+//
+// consumer should fall back to standard OTLP, (true, nil)
+func (e *Exporter) SendAndWait(ctx context.Context, data interface{}) (bool, error) {
+	for {
+		var stream *Stream
+		var err error
+		select {
+		case <-ctx.Done():
+			err = ctx.Err()
+		case stream = <-e.ready.readyChannel():
+		}
+
+		if err != nil {
+			return false, err // a Context error
+		}
+		if stream == nil {
+			return false, nil // a downgraded connection
+		}
+
+		err = stream.SendAndWait(ctx, data)
+		if err != nil && errors.Is(err, ErrStreamRestarting) {
+			continue // an internal retry
+
+		}
+		// result from arrow server (may be nil, may be
+		// permanent, etc.)
+		return true, err
 	}
 }
 
