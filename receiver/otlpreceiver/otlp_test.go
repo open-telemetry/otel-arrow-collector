@@ -28,6 +28,8 @@ import (
 	"testing"
 	"time"
 
+	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
+	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	spb "google.golang.org/genproto/googleapis/rpc/status"
@@ -1063,4 +1065,54 @@ func (esc *errOrSinkConsumer) Reset() {
 	if esc.MetricsSink != nil {
 		esc.MetricsSink.Reset()
 	}
+}
+
+func TestGRPCArrowReceiver(t *testing.T) {
+	addr := testutil.GetAvailableLocalAddress(t)
+	sink := new(consumertest.TracesSink)
+
+	factory := NewFactory()
+	cfg := factory.CreateDefaultConfig().(*Config)
+	cfg.GRPC.NetAddr.Endpoint = addr
+	cfg.HTTP = nil
+	cfg.Arrow.Enabled = true
+	ocr := newReceiver(t, factory, cfg, sink, nil)
+
+	require.NotNil(t, ocr)
+	require.NoError(t, ocr.Start(context.Background(), componenttest.NewNopHost()))
+
+	cc, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client := arrowpb.NewArrowStreamServiceClient(cc)
+	stream, err := client.ArrowStream(ctx, grpc.WaitForReady(true))
+	require.NoError(t, err)
+	producer := arrowRecord.NewProducer()
+
+	var expectTraces []ptrace.Traces
+	// Repeatedly send traces via arrow
+	for i := 0; i < 10; i++ {
+		td := testdata.GenerateTraces(2)
+		expectTraces = append(expectTraces, td)
+
+		batch, err := producer.BatchArrowRecordsFromTraces(td)
+		require.NoError(t, err)
+
+		err = stream.Send(batch)
+		require.NoError(t, err)
+
+		resp, err := stream.Recv()
+		require.NoError(t, err)
+		require.Equal(t, 1, len(resp.Statuses))
+		require.Equal(t, batch.BatchId, resp.Statuses[0].BatchId)
+		require.Equal(t, arrowpb.StatusCode_OK, resp.Statuses[0].StatusCode)
+	}
+
+	assert.NoError(t, cc.Close())
+	require.NoError(t, ocr.Shutdown(context.Background()))
+
+	assert.Equal(t, expectTraces, sink.AllTraces())
 }

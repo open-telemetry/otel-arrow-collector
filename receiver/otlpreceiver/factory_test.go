@@ -44,6 +44,7 @@ func TestCreateReceiver(t *testing.T) {
 	cfg := factory.CreateDefaultConfig().(*Config)
 	cfg.GRPC.NetAddr.Endpoint = testutil.GetAvailableLocalAddress(t)
 	cfg.HTTP.Endpoint = testutil.GetAvailableLocalAddress(t)
+	cfg.Arrow.Enabled = true
 
 	creationSet := componenttest.NewNopReceiverCreateSettings()
 	tReceiver, err := factory.CreateTracesReceiver(context.Background(), creationSet, cfg, consumertest.NewNop())
