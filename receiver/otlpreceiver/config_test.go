@@ -140,6 +140,9 @@ func TestUnmarshalConfig(t *testing.T) {
 						MaxAge:         7200,
 					},
 				},
+				Arrow: &ArrowSettings{
+					Enabled: true,
+				},
 			},
 		}, cfg)
 
@@ -165,6 +168,9 @@ func TestUnmarshalConfigUnix(t *testing.T) {
 				HTTP: &confighttp.HTTPServerSettings{
 					Endpoint: "/tmp/http_otlp.sock",
 					// Transport: "unix",
+				},
+				Arrow: &ArrowSettings{
+					Enabled: false,
 				},
 			},
 		}, cfg)
@@ -193,6 +199,15 @@ func TestUnmarshalConfigEmptyProtocols(t *testing.T) {
 	cfg := factory.CreateDefaultConfig()
 	assert.NoError(t, config.UnmarshalReceiver(cm, cfg))
 	assert.EqualError(t, cfg.Validate(), "must specify at least one protocol when using the OTLP receiver")
+}
+
+func TestUnmarshalConfigArrowWithoutGRPC(t *testing.T) {
+	cm, err := confmaptest.LoadConf(filepath.Join("testdata", "arrow_without_grpc.yaml"))
+	require.NoError(t, err)
+	factory := NewFactory()
+	cfg := factory.CreateDefaultConfig()
+	assert.NoError(t, config.UnmarshalReceiver(cm, cfg))
+	assert.EqualError(t, cfg.Validate(), "must specify at gRPC protocol when using the OTLP+Arrow receiver")
 }
 
 func TestUnmarshalConfigEmpty(t *testing.T) {
