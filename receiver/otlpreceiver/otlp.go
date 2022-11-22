@@ -130,8 +130,9 @@ func (r *otlpReceiver) startProtocolServers(host component.Host) error {
 		}
 
 		if r.cfg.Arrow != nil && r.cfg.Arrow.Enabled {
-			r.arrowReceiver = arrow.New(r.cfg.ID(), arrow.Consumers(r), r.settings, arrowRecord.NewConsumer())
-
+			r.arrowReceiver = arrow.New(r.cfg.ID(), arrow.Consumers(r), r.settings, func() arrowRecord.ConsumerAPI {
+				return arrowRecord.NewConsumer()
+			})
 			arrowpb.RegisterArrowStreamServiceServer(r.serverGRPC, r.arrowReceiver)
 		}
 
