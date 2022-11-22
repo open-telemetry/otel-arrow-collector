@@ -23,28 +23,23 @@ import (
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
 	arrowCollectorMock "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1/mock"
 	"github.com/golang/mock/gomock"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
+	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/internal/testdata"
 )
 
-// TODO: More tests requested in PR12:
-// Case of a very large protobuf message whose objective would be to
-// crash the collector (maybe this test is already done at the
-// collector level in a more general way).
-
 var (
 	singleStreamSettings = Settings{
 		Enabled:    true,
 		NumStreams: 1,
-	}
-
-	twoStreamsSettings = Settings{
-		Enabled:    true,
-		NumStreams: 2,
 	}
 
 	twoTraces  = testdata.GenerateTraces(2)
@@ -61,6 +56,7 @@ type testChannel interface {
 type commonTestCase struct {
 	ctrl          *gomock.Controller
 	telset        component.TelemetrySettings
+	observedLogs  *observer.ObservedLogs
 	serviceClient arrowpb.ArrowStreamServiceClient
 	streamCall    *gomock.Call
 }
@@ -70,17 +66,19 @@ type noisyTest bool
 const Noisy noisyTest = true
 const NotNoisy noisyTest = false
 
-func newTestTelemetry(t *testing.T, noisy noisyTest) component.TelemetrySettings {
+func newTestTelemetry(t *testing.T, noisy noisyTest) (component.TelemetrySettings, *observer.ObservedLogs) {
 	telset := componenttest.NewNopTelemetrySettings()
-	if !noisy {
-		telset.Logger = zaptest.NewLogger(t)
+	if noisy {
+		return telset, nil
 	}
-	return telset
+	core, obslogs := observer.New(zapcore.DebugLevel)
+	telset.Logger = zap.New(zapcore.NewTee(core, zaptest.NewLogger(t).Core()))
+	return telset, obslogs
 }
 
 func newCommonTestCase(t *testing.T, noisy noisyTest) *commonTestCase {
 	ctrl := gomock.NewController(t)
-	telset := newTestTelemetry(t, noisy)
+	telset, obslogs := newTestTelemetry(t, noisy)
 
 	client := arrowCollectorMock.NewMockArrowStreamServiceClient(ctrl)
 
@@ -91,6 +89,7 @@ func newCommonTestCase(t *testing.T, noisy noisyTest) *commonTestCase {
 	return &commonTestCase{
 		ctrl:          ctrl,
 		telset:        telset,
+		observedLogs:  obslogs,
 		serviceClient: client,
 		streamCall:    streamCall,
 	}
@@ -249,8 +248,8 @@ func (tc *unresponsiveTestChannel) unblock() {
 	close(tc.ch)
 }
 
-// unsupportedTestChannel does not accept the connection.
-// TODO: Make this match the behavior of the gRPC server for an unrecognized request.
+// unsupportedTestChannel mimics gRPC's behavior when there is no
+// arrow stream service registered with the server.
 type arrowUnsupportedTestChannel struct {
 }
 
@@ -259,18 +258,23 @@ func newArrowUnsupportedTestChannel() *arrowUnsupportedTestChannel {
 }
 
 func (tc *arrowUnsupportedTestChannel) onConnect(_ context.Context) error {
-	return fmt.Errorf("connection failed")
+	// Note: this matches gRPC's apparent behavior. the stream
+	// connection succeeds and the unsupported code is returned to
+	// the Recv() call.
+	return nil
 }
 
 func (tc *arrowUnsupportedTestChannel) onSend(ctx context.Context) func(*arrowpb.BatchArrowRecords) error {
 	return func(req *arrowpb.BatchArrowRecords) error {
-		panic("unreachable")
+		<-ctx.Done()
+		return ctx.Err()
 	}
 }
 
 func (tc *arrowUnsupportedTestChannel) onRecv(ctx context.Context) func() (*arrowpb.BatchStatus, error) {
 	return func() (*arrowpb.BatchStatus, error) {
-		panic("unreachable")
+		err := status.Error(codes.Unimplemented, "arrow will not be served")
+		return &arrowpb.BatchStatus{}, err
 	}
 }
 
@@ -328,5 +332,29 @@ func (tc *sendErrorTestChannel) onRecv(ctx context.Context) func() (*arrowpb.Bat
 	return func() (*arrowpb.BatchStatus, error) {
 		<-tc.release
 		return &arrowpb.BatchStatus{}, io.EOF
+	}
+}
+
+// connectErrorTestChannel returns an error from the ArrowStream() call
+type connectErrorTestChannel struct {
+}
+
+func newConnectErrorTestChannel() *connectErrorTestChannel {
+	return &connectErrorTestChannel{}
+}
+
+func (tc *connectErrorTestChannel) onConnect(ctx context.Context) error {
+	return fmt.Errorf("test connect error")
+}
+
+func (tc *connectErrorTestChannel) onSend(ctx context.Context) func(*arrowpb.BatchArrowRecords) error {
+	return func(*arrowpb.BatchArrowRecords) error {
+		panic("not reached")
+	}
+}
+
+func (tc *connectErrorTestChannel) onRecv(ctx context.Context) func() (*arrowpb.BatchStatus, error) {
+	return func() (*arrowpb.BatchStatus, error) {
+		panic("not reached")
 	}
 }

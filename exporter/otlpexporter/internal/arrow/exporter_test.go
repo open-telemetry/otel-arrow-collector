@@ -25,7 +25,9 @@ import (
 	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 	arrowRecordMock "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record/mock"
 	"github.com/golang/mock/gomock"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/atomic"
 
 	"go.opentelemetry.io/collector/internal/testdata"
 	"go.opentelemetry.io/collector/pdata/plog"
@@ -122,9 +124,6 @@ func TestArrowExporterSuccess(t *testing.T) {
 		ctx := context.Background()
 		require.NoError(t, tc.exporter.Start(ctx))
 
-		consumer, err := tc.exporter.GetStream(ctx)
-		require.NoError(t, err)
-
 		var wg sync.WaitGroup
 		var outputData *arrowpb.BatchArrowRecords
 		wg.Add(1)
@@ -134,7 +133,9 @@ func TestArrowExporterSuccess(t *testing.T) {
 			channel.recv <- statusOKFor(outputData.BatchId)
 		}()
 
-		require.NoError(t, consumer.SendAndWait(ctx, inputData))
+		sent, err := tc.exporter.SendAndWait(ctx, inputData)
+		require.NoError(t, err)
+		require.True(t, sent)
 
 		wg.Wait()
 
@@ -168,22 +169,40 @@ func TestArrowExporterTimeout(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	require.NoError(t, tc.exporter.Start(ctx))
 
-	consumer, err := tc.exporter.GetStream(ctx)
-	require.NoError(t, err)
-
 	go func() {
 		time.Sleep(200 * time.Millisecond)
 		cancel()
 	}()
-	err = consumer.SendAndWait(ctx, twoTraces)
+	_, err := tc.exporter.SendAndWait(ctx, twoTraces)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, context.Canceled))
 
 	require.NoError(t, tc.exporter.Shutdown(ctx))
 }
 
-// TestArrowExporterDowngrade tests that if the connetions fail fast
-// (TODO in a precisely appropriate way) the connection is downgraded
+// TestConnectError tests that if the connetions fail fast the
+// stream object for some reason is nil.  This causes downgrade.
+func TestArrowExporterStreamConnectError(t *testing.T) {
+	tc := newExporterTestCase(t, NotNoisy, singleStreamSettings)
+	channel := newConnectErrorTestChannel()
+
+	tc.streamCall.AnyTimes().DoAndReturn(tc.returnNewStream(channel))
+
+	bg := context.Background()
+	require.NoError(t, tc.exporter.Start(bg))
+
+	sent, err := tc.exporter.SendAndWait(bg, twoTraces)
+	require.False(t, sent)
+	require.NoError(t, err)
+
+	require.NoError(t, tc.exporter.Shutdown(bg))
+
+	require.Less(t, 0, len(tc.observedLogs.All()), "should have at least one log: %v", tc.observedLogs.All())
+	require.Equal(t, tc.observedLogs.All()[0].Message, "cannot start arrow stream")
+}
+
+// TestArrowExporterDowngrade tests that if the Recv() returns an
+// Unimplemented code (as gRPC does) that the connection is downgraded
 // without error.
 func TestArrowExporterDowngrade(t *testing.T) {
 	tc := newExporterTestCase(t, NotNoisy, singleStreamSettings)
@@ -194,13 +213,15 @@ func TestArrowExporterDowngrade(t *testing.T) {
 	bg := context.Background()
 	require.NoError(t, tc.exporter.Start(bg))
 
-	stream, err := tc.exporter.GetStream(bg)
-	require.Nil(t, stream)
+	sent, err := tc.exporter.SendAndWait(bg, twoTraces)
+	require.False(t, sent)
 	require.NoError(t, err)
 
-	// TODO: test the logger was used to report "downgrading"
-
 	require.NoError(t, tc.exporter.Shutdown(bg))
+
+	require.Less(t, 1, len(tc.observedLogs.All()), "should have at least two logs: %v", tc.observedLogs.All())
+	require.Equal(t, tc.observedLogs.All()[0].Message, "arrow is not supported")
+	require.Contains(t, tc.observedLogs.All()[1].Message, "downgrading")
 }
 
 // TestArrowExporterConnectTimeout tests that an error is returned to
@@ -219,8 +240,7 @@ func TestArrowExporterConnectTimeout(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 		cancel()
 	}()
-	stream, err := tc.exporter.GetStream(ctx)
-	require.Nil(t, stream)
+	_, err := tc.exporter.SendAndWait(ctx, twoTraces)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, context.Canceled))
 
@@ -253,20 +273,10 @@ func TestArrowExporterStreamFailure(t *testing.T) {
 		channel1.recv <- statusOKFor(outputData.BatchId)
 	}()
 
-	for times := 0; times < 2; times++ {
-		stream, err := tc.exporter.GetStream(bg)
-		require.NotNil(t, stream)
-		require.NoError(t, err)
+	sent, err := tc.exporter.SendAndWait(bg, twoTraces)
+	require.NoError(t, err)
+	require.True(t, sent)
 
-		err = stream.SendAndWait(bg, twoTraces)
-
-		if times == 0 {
-			require.Error(t, err)
-			require.True(t, errors.Is(err, ErrStreamRestarting))
-		} else {
-			require.NoError(t, err)
-		}
-	}
 	wg.Wait()
 
 	require.NoError(t, tc.exporter.Shutdown(bg))
@@ -277,30 +287,54 @@ func TestArrowExporterStreamFailure(t *testing.T) {
 // exercise the removeReady() code path.
 func TestArrowExporterStreamRace(t *testing.T) {
 	// Two streams ensures every possibility.
-	tc := newExporterTestCase(t, Noisy, twoStreamsSettings)
+	tc := newExporterTestCase(t, Noisy, Settings{
+		Enabled: true,
+
+		// This creates the conditions likely to produce a
+		// stream race in prioritizer.go.
+		NumStreams: 20,
+	})
+
+	var tries atomic.Int32
 
 	tc.streamCall.AnyTimes().DoAndReturn(tc.repeatedNewStream(func() testChannel {
 		tc := newUnresponsiveTestChannel()
 		// Immediately unblock to return the EOF to the stream
 		// receiver and shut down the stream.
 		go tc.unblock()
+		tries.Add(1)
 		return tc
 	}))
+
+	var wg sync.WaitGroup
 
 	bg := context.Background()
 	require.NoError(t, tc.exporter.Start(bg))
 
-	for tries := 0; tries < 1000; tries++ {
-		stream, err := tc.exporter.GetStream(bg)
-		require.NotNil(t, stream)
-		require.NoError(t, err)
+	callctx, cancel := context.WithCancel(bg)
 
-		err = stream.SendAndWait(bg, twoTraces)
-
-		require.Error(t, err)
-		require.True(t, errors.Is(err, ErrStreamRestarting))
+	// These goroutines will repeatedly try for an available
+	// stream, but none will become available.  Eventually the
+	// context will be canceled and cause these goroutines to
+	// return.
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// This blocks until the cancelation.
+			_, err := tc.exporter.SendAndWait(callctx, twoTraces)
+			require.Error(t, err)
+			require.True(t, errors.Is(err, context.Canceled))
+		}()
 	}
 
+	// Wait until 1000 streams have started.
+	assert.Eventually(t, func() bool {
+		return tries.Load() >= 1000
+	}, 10*time.Second, 5*time.Millisecond)
+
+	cancel()
+	wg.Wait()
 	require.NoError(t, tc.exporter.Shutdown(bg))
 }
 
@@ -332,15 +366,14 @@ func TestArrowExporterStreaming(t *testing.T) {
 	}()
 
 	for times := 0; times < 10; times++ {
-		stream, err := tc.exporter.GetStream(bg)
-		require.NotNil(t, stream)
-		require.NoError(t, err)
-
 		input := testdata.GenerateTraces(2)
-		expectOutput = append(expectOutput, input)
+		ctx := context.Background()
 
-		err = stream.SendAndWait(bg, input)
+		sent, err := tc.exporter.SendAndWait(ctx, input)
 		require.NoError(t, err)
+		require.True(t, sent)
+
+		expectOutput = append(expectOutput, input)
 	}
 	// Stop the test conduit started above.  If the sender were
 	// still sending, it would panic on a closed channel.

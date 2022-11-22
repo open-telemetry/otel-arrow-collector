@@ -81,8 +81,9 @@ func (sp *streamPrioritizer) removeReady(stream *Stream) {
 			sp.channel <- alternate
 		case wri := <-stream.toWrite:
 			// A consumer got us first, means this stream has been removed
-			// from the ready queue.  Note: exporterhelper will retry.
-			// TODO: Would it be better to handle retry in this directly?
+			// from the ready queue.
+			//
+			// Note: the top-level OTLP exporter will retry.
 			wri.errCh <- ErrStreamRestarting
 			return
 		}

@@ -16,7 +16,9 @@ package arrow // import "go.opentelemetry.io/collector/exporter/otlpexporter/int
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"sync"
 
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
@@ -24,6 +26,8 @@ import (
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer/consumererror"
@@ -100,13 +104,22 @@ func (s *Stream) run(bgctx context.Context, client arrowpb.ArrowStreamServiceCli
 
 	sc, err := client.ArrowStream(ctx, grpcOptions...)
 	if err != nil {
-		// TODO: only when this is a permanent (e.g., "no such
-		// method") error, downgrade to standard OTLP.
 		// Returning with stream.client == nil signals the
 		// lack of an Arrow stream endpoint.  When all the
 		// streams return with .client == nil, the ready
 		// channel will be closed.
-		s.telemetry.Logger.Error("cannot start event stream", zap.Error(err))
+		//
+		// Note: These are gRPC server internal errors and
+		// will cause downgrade to standard OTLP.  These
+		// cannot be simulated by connecting to a gRPC server
+		// that does not support the ArrowStream service, with
+		// or without the WaitForReady flag set.  In a real
+		// gRPC server the first Unimplemented code is
+		// generally delivered to the Recv() call below, so
+		// this code path is not taken for an ordinary downgrade.
+		//
+		// TODO: a more graceful recovery strategy?
+		s.telemetry.Logger.Error("cannot start arrow stream", zap.Error(err))
 		return
 	}
 	// Setting .client != nil indicates that the endpoint was valid,
@@ -125,18 +138,40 @@ func (s *Stream) run(bgctx context.Context, client arrowpb.ArrowStreamServiceCli
 		s.write(ctx)
 	}()
 
-	if err := s.read(ctx); err != nil {
-		s.telemetry.Logger.Error("arrow recv", zap.Error(err))
-	}
+	// the result from read() is processed after cancel and wait,
+	// so we can set s.client = nil in case of a delayed Unimplemented.
+	err = s.read(ctx)
+
 	// Wait for the writer to ensure that all waiters are known.
 	cancel()
 	ww.Wait()
 
+	if err != nil {
+		// This branch is reached with an unimplemented status
+		// with or without the WaitForReady flag.
+		if status, ok := status.FromError(err); ok && status.Code() == codes.Unimplemented {
+			// This (client == nil) signals the controller
+			// to downgrade when all streams have returned
+			// in that status.
+			//
+			// TODO: Note there are partial failure modes
+			// that will continue to function in a
+			// degraded mode, such as when half of the
+			// streams are successful and half of streams
+			// take this return path.  Design a graceful
+			// recovery mechanism?
+			s.client = nil
+			s.telemetry.Logger.Info("arrow is not supported", zap.Error(err))
+		} else if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
+			// TODO: Should we add debug-level logs for EOF and Canceled?
+			s.telemetry.Logger.Error("arrow recv", zap.Error(err))
+		}
+	}
+
 	// The reader and writer have both finished; respond to any
 	// outstanding waiters.
 	for _, ch := range s.waiters {
-		// Note: exporterhelper will retry.
-		// TODO: Would it be better to handle retry in this directly?
+		// Note: the top-level OTLP exporter will retry.
 		ch <- ErrStreamRestarting
 	}
 }
@@ -182,7 +217,10 @@ func (s *Stream) write(ctx context.Context) {
 
 		if err := s.client.Send(batch); err != nil {
 			// The error will be sent to errCh during cleanup for this stream.
-			s.telemetry.Logger.Error("arrow send", zap.Error(err))
+			// TODO: Should we add debug-level logs for EOF and Canceled?
+			if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
+				s.telemetry.Logger.Error("arrow send", zap.Error(err))
+			}
 			return
 		}
 	}

@@ -132,21 +132,21 @@ func (e *exporter) shutdown(ctx context.Context) error {
 	return err
 }
 
-// getArrowStream returns the first-available stream when Arrow is
-// configured.  This returns nil when the consumer should fall back to
-// standard OTLP.
-func (e *exporter) getArrowStream(ctx context.Context) (*arrow.Stream, error) {
+// arrowSendAndWait gets an available stream and tries to send using
+// Arrow if it is configured.  A (false, nil) result indicates for the
+// caller to fall back to ordinary OTLP.
+func (e *exporter) arrowSendAndWait(ctx context.Context, data interface{}) (sent bool, _ error) {
 	if e.arrow == nil {
-		return nil, nil
+		return false, nil
 	}
-	return e.arrow.GetStream(ctx)
+	return e.arrow.SendAndWait(ctx, data)
 }
 
 func (e *exporter) pushTraces(ctx context.Context, td ptrace.Traces) error {
-	if stream, err := e.getArrowStream(ctx); err != nil {
+	if sent, err := e.arrowSendAndWait(ctx, td); err != nil {
 		return err
-	} else if stream != nil {
-		return stream.SendAndWait(ctx, td)
+	} else if sent {
+		return nil
 	}
 	req := ptraceotlp.NewExportRequestFromTraces(td)
 	_, err := e.traceExporter.Export(e.enhanceContext(ctx), req, e.callOptions...)
@@ -154,10 +154,10 @@ func (e *exporter) pushTraces(ctx context.Context, td ptrace.Traces) error {
 }
 
 func (e *exporter) pushMetrics(ctx context.Context, md pmetric.Metrics) error {
-	if stream, err := e.getArrowStream(ctx); err != nil {
+	if sent, err := e.arrowSendAndWait(ctx, md); err != nil {
 		return err
-	} else if stream != nil {
-		return stream.SendAndWait(ctx, md)
+	} else if sent {
+		return nil
 	}
 	req := pmetricotlp.NewExportRequestFromMetrics(md)
 	_, err := e.metricExporter.Export(e.enhanceContext(ctx), req, e.callOptions...)
@@ -165,10 +165,10 @@ func (e *exporter) pushMetrics(ctx context.Context, md pmetric.Metrics) error {
 }
 
 func (e *exporter) pushLogs(ctx context.Context, ld plog.Logs) error {
-	if stream, err := e.getArrowStream(ctx); err != nil {
+	if sent, err := e.arrowSendAndWait(ctx, ld); err != nil {
 		return err
-	} else if stream != nil {
-		return stream.SendAndWait(ctx, ld)
+	} else if sent {
+		return nil
 	}
 	req := plogotlp.NewExportRequestFromLogs(ld)
 	_, err := e.logExporter.Export(e.enhanceContext(ctx), req, e.callOptions...)
