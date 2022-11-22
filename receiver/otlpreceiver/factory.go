@@ -59,6 +59,9 @@ func createDefaultConfig() config.Receiver {
 			HTTP: &confighttp.HTTPServerSettings{
 				Endpoint: defaultHTTPEndpoint,
 			},
+			Arrow: &ArrowSettings{
+				Enabled: false,
+			},
 		},
 	}
 }
