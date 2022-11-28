@@ -30,7 +30,7 @@ require (
 	github.com/cenkalti/backoff/v4 v4.2.0 // indirect
 	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/f5/otel-arrow-adapter v0.0.0-20221117192416-4be8d64bf483 // indirect
+	github.com/f5/otel-arrow-adapter v0.0.0-20221123183754-cc5f830bf358 // indirect
 	github.com/felixge/httpsnoop v1.0.3 // indirect
 	github.com/go-kit/log v0.2.1 // indirect
 	github.com/go-logfmt/logfmt v0.5.1 // indirect
@@ -79,7 +79,7 @@ require (
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/collector/consumer v0.65.0 // indirect
 	go.opentelemetry.io/collector/featuregate v0.65.0 // indirect
-	go.opentelemetry.io/collector/pdata v0.65.0 // indirect
+	go.opentelemetry.io/collector/pdata v0.66.0 // indirect
 	go.opentelemetry.io/collector/semconv v0.65.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.36.4 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.36.4 // indirect
