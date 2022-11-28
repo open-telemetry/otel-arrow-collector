@@ -17,9 +17,22 @@ package component // import "go.opentelemetry.io/collector/component"
 import (
 	"context"
 
-	"go.opentelemetry.io/collector/config"
+	"go.opentelemetry.io/collector/confmap"
 	"go.opentelemetry.io/collector/consumer"
 )
+
+// ReceiverConfig is the configuration of a component.Receiver. Specific Extension must implement
+// this interface and must embed ReceiverSettings struct or a struct that extends it.
+type ReceiverConfig interface {
+	Config
+}
+
+// UnmarshalReceiverConfig helper function to unmarshal a ReceiverConfig.
+// It checks if the config implements confmap.Unmarshaler and uses that if available,
+// otherwise uses Map.UnmarshalExact, erroring if a field is nonexistent.
+func UnmarshalReceiverConfig(conf *confmap.Conf, cfg ReceiverConfig) error {
+	return unmarshal(conf, cfg)
+}
 
 // Receiver allows the collector to receive metrics, traces and logs.
 //
@@ -59,9 +72,8 @@ import (
 //
 // This ensures there are strong delivery guarantees once the data is acknowledged
 // by the Collector.
-type Receiver interface {
-	Component
-}
+// Deprecated: [v0.65.0] unnecessary interface, will be removed.
+type Receiver = Component
 
 // A TracesReceiver receives traces.
 // Its purpose is to translate data from any format to the collector's internal trace format.
@@ -69,7 +81,7 @@ type Receiver interface {
 //
 // For example it could be Zipkin data source which translates Zipkin spans into ptrace.Traces.
 type TracesReceiver interface {
-	Receiver
+	Component
 }
 
 // A MetricsReceiver receives metrics.
@@ -78,7 +90,7 @@ type TracesReceiver interface {
 //
 // For example it could be Prometheus data source which translates Prometheus metrics into pmetric.Metrics.
 type MetricsReceiver interface {
-	Receiver
+	Component
 }
 
 // A LogsReceiver receives logs.
@@ -87,7 +99,7 @@ type MetricsReceiver interface {
 //
 // For example a LogsReceiver can read syslogs and convert them into plog.Logs.
 type LogsReceiver interface {
-	Receiver
+	Component
 }
 
 // ReceiverCreateSettings configures Receiver creators.
@@ -110,14 +122,14 @@ type ReceiverFactory interface {
 	// configuration and should not cause side-effects that prevent the creation
 	// of multiple instances of the Receiver.
 	// The object returned by this method needs to pass the checks implemented by
-	// 'configtest.CheckConfigStruct'. It is recommended to have these checks in the
+	// 'componenttest.CheckConfigStruct'. It is recommended to have these checks in the
 	// tests of any implementation of the Factory interface.
-	CreateDefaultConfig() config.Receiver
+	CreateDefaultConfig() ReceiverConfig
 
 	// CreateTracesReceiver creates a TracesReceiver based on this config.
 	// If the receiver type does not support tracing or if the config is not valid
 	// an error will be returned instead.
-	CreateTracesReceiver(ctx context.Context, set ReceiverCreateSettings, cfg config.Receiver, nextConsumer consumer.Traces) (TracesReceiver, error)
+	CreateTracesReceiver(ctx context.Context, set ReceiverCreateSettings, cfg ReceiverConfig, nextConsumer consumer.Traces) (TracesReceiver, error)
 
 	// TracesReceiverStability gets the stability level of the TracesReceiver.
 	TracesReceiverStability() StabilityLevel
@@ -125,7 +137,7 @@ type ReceiverFactory interface {
 	// CreateMetricsReceiver creates a MetricsReceiver based on this config.
 	// If the receiver type does not support metrics or if the config is not valid
 	// an error will be returned instead.
-	CreateMetricsReceiver(ctx context.Context, set ReceiverCreateSettings, cfg config.Receiver, nextConsumer consumer.Metrics) (MetricsReceiver, error)
+	CreateMetricsReceiver(ctx context.Context, set ReceiverCreateSettings, cfg ReceiverConfig, nextConsumer consumer.Metrics) (MetricsReceiver, error)
 
 	// MetricsReceiverStability gets the stability level of the MetricsReceiver.
 	MetricsReceiverStability() StabilityLevel
@@ -133,7 +145,7 @@ type ReceiverFactory interface {
 	// CreateLogsReceiver creates a LogsReceiver based on this config.
 	// If the receiver type does not support the data type or if the config is not valid
 	// an error will be returned instead.
-	CreateLogsReceiver(ctx context.Context, set ReceiverCreateSettings, cfg config.Receiver, nextConsumer consumer.Logs) (LogsReceiver, error)
+	CreateLogsReceiver(ctx context.Context, set ReceiverCreateSettings, cfg ReceiverConfig, nextConsumer consumer.Logs) (LogsReceiver, error)
 
 	// LogsReceiverStability gets the stability level of the LogsReceiver.
 	LogsReceiverStability() StabilityLevel
@@ -155,21 +167,21 @@ func (f receiverFactoryOptionFunc) applyReceiverFactoryOption(o *receiverFactory
 }
 
 // ReceiverCreateDefaultConfigFunc is the equivalent of ReceiverFactory.CreateDefaultConfig().
-type ReceiverCreateDefaultConfigFunc func() config.Receiver
+type ReceiverCreateDefaultConfigFunc func() ReceiverConfig
 
 // CreateDefaultConfig implements ReceiverFactory.CreateDefaultConfig().
-func (f ReceiverCreateDefaultConfigFunc) CreateDefaultConfig() config.Receiver {
+func (f ReceiverCreateDefaultConfigFunc) CreateDefaultConfig() ReceiverConfig {
 	return f()
 }
 
 // CreateTracesReceiverFunc is the equivalent of ReceiverFactory.CreateTracesReceiver().
-type CreateTracesReceiverFunc func(context.Context, ReceiverCreateSettings, config.Receiver, consumer.Traces) (TracesReceiver, error)
+type CreateTracesReceiverFunc func(context.Context, ReceiverCreateSettings, ReceiverConfig, consumer.Traces) (TracesReceiver, error)
 
 // CreateTracesReceiver implements ReceiverFactory.CreateTracesReceiver().
 func (f CreateTracesReceiverFunc) CreateTracesReceiver(
 	ctx context.Context,
 	set ReceiverCreateSettings,
-	cfg config.Receiver,
+	cfg ReceiverConfig,
 	nextConsumer consumer.Traces) (TracesReceiver, error) {
 	if f == nil {
 		return nil, ErrDataTypeIsNotSupported
@@ -178,13 +190,13 @@ func (f CreateTracesReceiverFunc) CreateTracesReceiver(
 }
 
 // CreateMetricsReceiverFunc is the equivalent of ReceiverFactory.CreateMetricsReceiver().
-type CreateMetricsReceiverFunc func(context.Context, ReceiverCreateSettings, config.Receiver, consumer.Metrics) (MetricsReceiver, error)
+type CreateMetricsReceiverFunc func(context.Context, ReceiverCreateSettings, ReceiverConfig, consumer.Metrics) (MetricsReceiver, error)
 
 // CreateMetricsReceiver implements ReceiverFactory.CreateMetricsReceiver().
 func (f CreateMetricsReceiverFunc) CreateMetricsReceiver(
 	ctx context.Context,
 	set ReceiverCreateSettings,
-	cfg config.Receiver,
+	cfg ReceiverConfig,
 	nextConsumer consumer.Metrics,
 ) (MetricsReceiver, error) {
 	if f == nil {
@@ -194,13 +206,13 @@ func (f CreateMetricsReceiverFunc) CreateMetricsReceiver(
 }
 
 // CreateLogsReceiverFunc is the equivalent of ReceiverFactory.CreateLogsReceiver().
-type CreateLogsReceiverFunc func(context.Context, ReceiverCreateSettings, config.Receiver, consumer.Logs) (LogsReceiver, error)
+type CreateLogsReceiverFunc func(context.Context, ReceiverCreateSettings, ReceiverConfig, consumer.Logs) (LogsReceiver, error)
 
 // CreateLogsReceiver implements ReceiverFactory.CreateLogsReceiver().
 func (f CreateLogsReceiverFunc) CreateLogsReceiver(
 	ctx context.Context,
 	set ReceiverCreateSettings,
-	cfg config.Receiver,
+	cfg ReceiverConfig,
 	nextConsumer consumer.Logs,
 ) (LogsReceiver, error) {
 	if f == nil {
@@ -257,7 +269,7 @@ func WithLogsReceiver(createLogsReceiver CreateLogsReceiverFunc, sl StabilityLev
 }
 
 // NewReceiverFactory returns a ReceiverFactory.
-func NewReceiverFactory(cfgType config.Type, createDefaultConfig ReceiverCreateDefaultConfigFunc, options ...ReceiverFactoryOption) ReceiverFactory {
+func NewReceiverFactory(cfgType Type, createDefaultConfig ReceiverCreateDefaultConfigFunc, options ...ReceiverFactoryOption) ReceiverFactory {
 	f := &receiverFactory{
 		baseFactory:                     baseFactory{cfgType: cfgType},
 		ReceiverCreateDefaultConfigFunc: createDefaultConfig,

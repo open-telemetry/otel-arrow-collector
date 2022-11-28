@@ -26,7 +26,6 @@ import (
 	"go.uber.org/zap"
 
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/extension/ballastextension"
 	"go.opentelemetry.io/collector/internal/iruntime"
 	"go.opentelemetry.io/collector/obsreport"
 	"go.opentelemetry.io/collector/pdata/plog"
@@ -115,6 +114,14 @@ func newMemoryLimiter(set component.ProcessorCreateSettings, cfg *Config) (*memo
 		zap.Uint64("spike_limit_mib", usageChecker.memSpikeLimit/mibBytes),
 		zap.Duration("check_interval", cfg.CheckInterval))
 
+	obsrep, err := obsreport.NewProcessor(obsreport.ProcessorSettings{
+		ProcessorID:             cfg.ID(),
+		ProcessorCreateSettings: set,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	ml := &memoryLimiter{
 		usageChecker:   *usageChecker,
 		memCheckWait:   cfg.CheckInterval,
@@ -122,10 +129,7 @@ func newMemoryLimiter(set component.ProcessorCreateSettings, cfg *Config) (*memo
 		readMemStatsFn: runtime.ReadMemStats,
 		logger:         logger,
 		forceDrop:      atomic.NewBool(false),
-		obsrep: obsreport.NewProcessor(obsreport.ProcessorSettings{
-			ProcessorID:             cfg.ID(),
-			ProcessorCreateSettings: set,
-		}),
+		obsrep:         obsrep,
 	}
 
 	return ml, nil
@@ -151,7 +155,7 @@ func getMemUsageChecker(cfg *Config, logger *zap.Logger) (*memUsageChecker, erro
 func (ml *memoryLimiter) start(_ context.Context, host component.Host) error {
 	extensions := host.GetExtensions()
 	for _, extension := range extensions {
-		if ext, ok := extension.(*ballastextension.MemoryBallast); ok {
+		if ext, ok := extension.(interface{ GetBallastSize() uint64 }); ok {
 			ml.ballastSize = ext.GetBallastSize()
 			break
 		}

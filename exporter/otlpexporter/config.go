@@ -17,6 +17,7 @@ package otlpexporter // import "go.opentelemetry.io/collector/exporter/otlpexpor
 import (
 	"fmt"
 
+	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
@@ -35,7 +36,7 @@ type Config struct {
 	Arrow *arrow.Settings `mapstructure:"arrow"`
 }
 
-var _ config.Exporter = (*Config)(nil)
+var _ component.ExporterConfig = (*Config)(nil)
 
 // Validate checks if the exporter configuration is valid
 func (cfg *Config) Validate() error {

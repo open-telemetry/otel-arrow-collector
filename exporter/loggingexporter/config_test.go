@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zapcore"
 
+	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/config/configtelemetry"
 	"go.opentelemetry.io/collector/confmap"
@@ -31,7 +32,7 @@ import (
 func TestUnmarshalDefaultConfig(t *testing.T) {
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig()
-	assert.NoError(t, config.UnmarshalExporter(confmap.New(), cfg))
+	assert.NoError(t, component.UnmarshalExporterConfig(confmap.New(), cfg))
 	assert.Equal(t, factory.CreateDefaultConfig(), cfg)
 }
 
@@ -44,7 +45,7 @@ func TestUnmarshalConfig(t *testing.T) {
 		{
 			filename: "config_loglevel.yaml",
 			cfg: &Config{
-				ExporterSettings:   config.NewExporterSettings(config.NewComponentID(typeStr)),
+				ExporterSettings:   config.NewExporterSettings(component.NewID(typeStr)),
 				LogLevel:           zapcore.DebugLevel,
 				Verbosity:          configtelemetry.LevelDetailed,
 				SamplingInitial:    10,
@@ -55,7 +56,7 @@ func TestUnmarshalConfig(t *testing.T) {
 		{
 			filename: "config_verbosity.yaml",
 			cfg: &Config{
-				ExporterSettings:   config.NewExporterSettings(config.NewComponentID(typeStr)),
+				ExporterSettings:   config.NewExporterSettings(component.NewID(typeStr)),
 				LogLevel:           zapcore.InfoLevel,
 				Verbosity:          configtelemetry.LevelDetailed,
 				SamplingInitial:    10,
@@ -65,7 +66,7 @@ func TestUnmarshalConfig(t *testing.T) {
 		{
 			filename: "loglevel_info.yaml",
 			cfg: &Config{
-				ExporterSettings:   config.NewExporterSettings(config.NewComponentID(typeStr)),
+				ExporterSettings:   config.NewExporterSettings(component.NewID(typeStr)),
 				LogLevel:           zapcore.InfoLevel,
 				Verbosity:          configtelemetry.LevelNormal,
 				SamplingInitial:    2,
@@ -85,7 +86,7 @@ func TestUnmarshalConfig(t *testing.T) {
 			require.NoError(t, err)
 			factory := NewFactory()
 			cfg := factory.CreateDefaultConfig()
-			err = config.UnmarshalExporter(cm, cfg)
+			err = component.UnmarshalExporterConfig(cm, cfg)
 			if tt.expectedErr != "" {
 				assert.EqualError(t, err, tt.expectedErr)
 			} else {
@@ -107,7 +108,7 @@ func TestValidate(t *testing.T) {
 			cfg: &Config{
 				Verbosity: configtelemetry.LevelNone,
 			},
-			expectedErr: "verbosity level \"none\" is not supported",
+			expectedErr: "verbosity level \"None\" is not supported",
 		},
 		{
 			name: "verbosity detailed",

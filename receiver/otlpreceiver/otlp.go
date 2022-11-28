@@ -110,12 +110,10 @@ func (r *otlpReceiver) startHTTPServer(cfg *confighttp.HTTPServerSettings, host 
 func (r *otlpReceiver) startProtocolServers(host component.Host) error {
 	var err error
 	if r.cfg.GRPC != nil {
-		var opts []grpc.ServerOption
-		opts, err = r.cfg.GRPC.ToServerOption(host, r.settings.TelemetrySettings)
+		r.serverGRPC, err = r.cfg.GRPC.ToServer(host, r.settings.TelemetrySettings)
 		if err != nil {
 			return err
 		}
-		r.serverGRPC = grpc.NewServer(opts...)
 
 		if r.traceReceiver != nil {
 			ptraceotlp.RegisterGRPCServer(r.serverGRPC, r.traceReceiver)
@@ -130,9 +128,12 @@ func (r *otlpReceiver) startProtocolServers(host component.Host) error {
 		}
 
 		if r.cfg.Arrow != nil && r.cfg.Arrow.Enabled {
-			r.arrowReceiver = arrow.New(r.cfg.ID(), arrow.Consumers(r), r.settings, func() arrowRecord.ConsumerAPI {
+			r.arrowReceiver, err = arrow.New(r.cfg.ID(), arrow.Consumers(r), r.settings, func() arrowRecord.ConsumerAPI {
 				return arrowRecord.NewConsumer()
 			})
+			if err != nil {
+				return err
+			}
 			arrowpb.RegisterArrowStreamServiceServer(r.serverGRPC, r.arrowReceiver)
 		}
 
@@ -187,7 +188,11 @@ func (r *otlpReceiver) registerTraceConsumer(tc consumer.Traces) error {
 	if tc == nil {
 		return component.ErrNilNextConsumer
 	}
-	r.traceReceiver = trace.New(r.cfg.ID(), tc, r.settings)
+	var err error
+	r.traceReceiver, err = trace.New(r.cfg.ID(), tc, r.settings)
+	if err != nil {
+		return err
+	}
 	if r.httpMux != nil {
 		r.httpMux.HandleFunc("/v1/traces", func(resp http.ResponseWriter, req *http.Request) {
 			if req.Method != http.MethodPost {
@@ -211,7 +216,12 @@ func (r *otlpReceiver) registerMetricsConsumer(mc consumer.Metrics) error {
 	if mc == nil {
 		return component.ErrNilNextConsumer
 	}
-	r.metricsReceiver = metrics.New(r.cfg.ID(), mc, r.settings)
+	var err error
+	r.metricsReceiver, err = metrics.New(r.cfg.ID(), mc, r.settings)
+	if err != nil {
+		return err
+	}
+
 	if r.httpMux != nil {
 		r.httpMux.HandleFunc("/v1/metrics", func(resp http.ResponseWriter, req *http.Request) {
 			if req.Method != http.MethodPost {
@@ -235,7 +245,12 @@ func (r *otlpReceiver) registerLogsConsumer(lc consumer.Logs) error {
 	if lc == nil {
 		return component.ErrNilNextConsumer
 	}
-	r.logReceiver = logs.New(r.cfg.ID(), lc, r.settings)
+	var err error
+	r.logReceiver, err = logs.New(r.cfg.ID(), lc, r.settings)
+	if err != nil {
+		return err
+	}
+
 	if r.httpMux != nil {
 		r.httpMux.HandleFunc("/v1/logs", func(resp http.ResponseWriter, req *http.Request) {
 			if req.Method != http.MethodPost {

@@ -23,11 +23,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/config/configcompression"
 	"go.opentelemetry.io/collector/config/configgrpc"
-	"go.opentelemetry.io/collector/config/configtest"
 	"go.opentelemetry.io/collector/config/configtls"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
 	"go.opentelemetry.io/collector/exporter/otlpexporter/internal/arrow"
@@ -38,7 +38,7 @@ func TestCreateDefaultConfig(t *testing.T) {
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig()
 	assert.NotNil(t, cfg, "failed to create default config")
-	assert.NoError(t, configtest.CheckConfigStruct(cfg))
+	assert.NoError(t, componenttest.CheckConfigStruct(cfg))
 	ocfg, ok := factory.CreateDefaultConfig().(*Config)
 	assert.True(t, ok)
 	assert.Equal(t, ocfg.RetrySettings, exporterhelper.NewDefaultRetrySettings())
@@ -70,7 +70,7 @@ func TestCreateTracesExporter(t *testing.T) {
 		{
 			name: "NoEndpoint",
 			config: Config{
-				ExporterSettings: config.NewExporterSettings(config.NewComponentID(typeStr)),
+				ExporterSettings: config.NewExporterSettings(component.NewID(typeStr)),
 				GRPCClientSettings: configgrpc.GRPCClientSettings{
 					Endpoint: "",
 				},
@@ -80,7 +80,7 @@ func TestCreateTracesExporter(t *testing.T) {
 		{
 			name: "UseSecure",
 			config: Config{
-				ExporterSettings: config.NewExporterSettings(config.NewComponentID(typeStr)),
+				ExporterSettings: config.NewExporterSettings(component.NewID(typeStr)),
 				GRPCClientSettings: configgrpc.GRPCClientSettings{
 					Endpoint: endpoint,
 					TLSSetting: configtls.TLSClientSetting{
@@ -92,7 +92,7 @@ func TestCreateTracesExporter(t *testing.T) {
 		{
 			name: "Keepalive",
 			config: Config{
-				ExporterSettings: config.NewExporterSettings(config.NewComponentID(typeStr)),
+				ExporterSettings: config.NewExporterSettings(component.NewID(typeStr)),
 				GRPCClientSettings: configgrpc.GRPCClientSettings{
 					Endpoint: endpoint,
 					Keepalive: &configgrpc.KeepaliveClientConfig{
@@ -106,7 +106,7 @@ func TestCreateTracesExporter(t *testing.T) {
 		{
 			name: "NoneCompression",
 			config: Config{
-				ExporterSettings: config.NewExporterSettings(config.NewComponentID(typeStr)),
+				ExporterSettings: config.NewExporterSettings(component.NewID(typeStr)),
 				GRPCClientSettings: configgrpc.GRPCClientSettings{
 					Endpoint:    endpoint,
 					Compression: "none",
@@ -116,7 +116,7 @@ func TestCreateTracesExporter(t *testing.T) {
 		{
 			name: "GzipCompression",
 			config: Config{
-				ExporterSettings: config.NewExporterSettings(config.NewComponentID(typeStr)),
+				ExporterSettings: config.NewExporterSettings(component.NewID(typeStr)),
 				GRPCClientSettings: configgrpc.GRPCClientSettings{
 					Endpoint:    endpoint,
 					Compression: configcompression.Gzip,
@@ -144,7 +144,7 @@ func TestCreateTracesExporter(t *testing.T) {
 		{
 			name: "Headers",
 			config: Config{
-				ExporterSettings: config.NewExporterSettings(config.NewComponentID(typeStr)),
+				ExporterSettings: config.NewExporterSettings(component.NewID(typeStr)),
 				GRPCClientSettings: configgrpc.GRPCClientSettings{
 					Endpoint: endpoint,
 					Headers: map[string]string{
@@ -157,7 +157,7 @@ func TestCreateTracesExporter(t *testing.T) {
 		{
 			name: "NumConsumers",
 			config: Config{
-				ExporterSettings: config.NewExporterSettings(config.NewComponentID(typeStr)),
+				ExporterSettings: config.NewExporterSettings(component.NewID(typeStr)),
 				GRPCClientSettings: configgrpc.GRPCClientSettings{
 					Endpoint: endpoint,
 				},
@@ -166,7 +166,7 @@ func TestCreateTracesExporter(t *testing.T) {
 		{
 			name: "CaCert",
 			config: Config{
-				ExporterSettings: config.NewExporterSettings(config.NewComponentID(typeStr)),
+				ExporterSettings: config.NewExporterSettings(component.NewID(typeStr)),
 				GRPCClientSettings: configgrpc.GRPCClientSettings{
 					Endpoint: endpoint,
 					TLSSetting: configtls.TLSClientSetting{
@@ -180,7 +180,7 @@ func TestCreateTracesExporter(t *testing.T) {
 		{
 			name: "CertPemFileError",
 			config: Config{
-				ExporterSettings: config.NewExporterSettings(config.NewComponentID(typeStr)),
+				ExporterSettings: config.NewExporterSettings(component.NewID(typeStr)),
 				GRPCClientSettings: configgrpc.GRPCClientSettings{
 					Endpoint: endpoint,
 					TLSSetting: configtls.TLSClientSetting{

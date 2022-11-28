@@ -32,7 +32,6 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
-	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal"
 	"go.opentelemetry.io/collector/extension/experimental/storage"
@@ -51,7 +50,8 @@ func TestQueuedRetry_DropOnPermanentError(t *testing.T) {
 	qCfg := NewDefaultQueueSettings()
 	rCfg := NewDefaultRetrySettings()
 	mockR := newMockRequest(context.Background(), 2, consumererror.NewPermanent(errors.New("bad data")))
-	be := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", mockRequestUnmarshaler(mockR))
+	be, err := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", mockRequestUnmarshaler(mockR))
+	require.NoError(t, err)
 	ocs := newObservabilityConsumerSender(be.qrSender.consumerSender)
 	be.qrSender.consumerSender = ocs
 	require.NoError(t, be.Start(context.Background(), componenttest.NewNopHost()))
@@ -74,7 +74,8 @@ func TestQueuedRetry_DropOnNoRetry(t *testing.T) {
 	qCfg := NewDefaultQueueSettings()
 	rCfg := NewDefaultRetrySettings()
 	rCfg.Enabled = false
-	be := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	be, err := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	require.NoError(t, err)
 	ocs := newObservabilityConsumerSender(be.qrSender.consumerSender)
 	be.qrSender.consumerSender = ocs
 	require.NoError(t, be.Start(context.Background(), componenttest.NewNopHost()))
@@ -99,7 +100,8 @@ func TestQueuedRetry_OnError(t *testing.T) {
 	qCfg.NumConsumers = 1
 	rCfg := NewDefaultRetrySettings()
 	rCfg.InitialInterval = 0
-	be := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	be, err := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	require.NoError(t, err)
 	ocs := newObservabilityConsumerSender(be.qrSender.consumerSender)
 	be.qrSender.consumerSender = ocs
 	require.NoError(t, be.Start(context.Background(), componenttest.NewNopHost()))
@@ -125,7 +127,8 @@ func TestQueuedRetry_StopWhileWaiting(t *testing.T) {
 	qCfg := NewDefaultQueueSettings()
 	qCfg.NumConsumers = 1
 	rCfg := NewDefaultRetrySettings()
-	be := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	be, err := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	require.NoError(t, err)
 	ocs := newObservabilityConsumerSender(be.qrSender.consumerSender)
 	be.qrSender.consumerSender = ocs
 	require.NoError(t, be.Start(context.Background(), componenttest.NewNopHost()))
@@ -158,7 +161,8 @@ func TestQueuedRetry_DoNotPreserveCancellation(t *testing.T) {
 	qCfg := NewDefaultQueueSettings()
 	qCfg.NumConsumers = 1
 	rCfg := NewDefaultRetrySettings()
-	be := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	be, err := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	require.NoError(t, err)
 	ocs := newObservabilityConsumerSender(be.qrSender.consumerSender)
 	be.qrSender.consumerSender = ocs
 	require.NoError(t, be.Start(context.Background(), componenttest.NewNopHost()))
@@ -187,7 +191,8 @@ func TestQueuedRetry_MaxElapsedTime(t *testing.T) {
 	rCfg := NewDefaultRetrySettings()
 	rCfg.InitialInterval = time.Millisecond
 	rCfg.MaxElapsedTime = 100 * time.Millisecond
-	be := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	be, err := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	require.NoError(t, err)
 	ocs := newObservabilityConsumerSender(be.qrSender.consumerSender)
 	be.qrSender.consumerSender = ocs
 	require.NoError(t, be.Start(context.Background(), componenttest.NewNopHost()))
@@ -233,7 +238,8 @@ func TestQueuedRetry_ThrottleError(t *testing.T) {
 	qCfg.NumConsumers = 1
 	rCfg := NewDefaultRetrySettings()
 	rCfg.InitialInterval = 10 * time.Millisecond
-	be := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	be, err := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	require.NoError(t, err)
 	ocs := newObservabilityConsumerSender(be.qrSender.consumerSender)
 	be.qrSender.consumerSender = ocs
 	require.NoError(t, be.Start(context.Background(), componenttest.NewNopHost()))
@@ -265,7 +271,8 @@ func TestQueuedRetry_RetryOnError(t *testing.T) {
 	qCfg.QueueSize = 1
 	rCfg := NewDefaultRetrySettings()
 	rCfg.InitialInterval = 0
-	be := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	be, err := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	require.NoError(t, err)
 	ocs := newObservabilityConsumerSender(be.qrSender.consumerSender)
 	be.qrSender.consumerSender = ocs
 	require.NoError(t, be.Start(context.Background(), componenttest.NewNopHost()))
@@ -291,14 +298,15 @@ func TestQueuedRetry_DropOnFull(t *testing.T) {
 	qCfg := NewDefaultQueueSettings()
 	qCfg.QueueSize = 0
 	rCfg := NewDefaultRetrySettings()
-	be := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	be, err := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	require.NoError(t, err)
 	ocs := newObservabilityConsumerSender(be.qrSender.consumerSender)
 	be.qrSender.consumerSender = ocs
 	require.NoError(t, be.Start(context.Background(), componenttest.NewNopHost()))
 	t.Cleanup(func() {
 		assert.NoError(t, be.Shutdown(context.Background()))
 	})
-	err := be.sender.send(newMockRequest(context.Background(), 2, errors.New("transient error")))
+	err = be.sender.send(newMockRequest(context.Background(), 2, errors.New("transient error")))
 	require.Error(t, err)
 }
 
@@ -309,7 +317,8 @@ func TestQueuedRetryHappyPath(t *testing.T) {
 
 	qCfg := NewDefaultQueueSettings()
 	rCfg := NewDefaultRetrySettings()
-	be := newBaseExporter(&defaultExporterCfg, tt.ToExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	be, err := newBaseExporter(&defaultExporterCfg, tt.ToExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	require.NoError(t, err)
 	ocs := newObservabilityConsumerSender(be.qrSender.consumerSender)
 	be.qrSender.consumerSender = ocs
 	require.NoError(t, be.Start(context.Background(), componenttest.NewNopHost()))
@@ -343,7 +352,8 @@ func TestQueuedRetry_QueueMetricsReported(t *testing.T) {
 	qCfg := NewDefaultQueueSettings()
 	qCfg.NumConsumers = 0 // to make every request go straight to the queue
 	rCfg := NewDefaultRetrySettings()
-	be := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	be, err := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	require.NoError(t, err)
 	require.NoError(t, be.Start(context.Background(), componenttest.NewNopHost()))
 
 	checkValueForGlobalManager(t, defaultExporterTags, int64(5000), "exporter/queue_capacity")
@@ -423,17 +433,17 @@ func TestGetRetrySettings(t *testing.T) {
 
 	for _, tC := range testCases {
 		t.Run(tC.desc, func(t *testing.T) {
-			storageID := config.NewComponentIDWithName("file_storage", strconv.Itoa(tC.storageIndex))
+			storageID := component.NewIDWithName("file_storage", strconv.Itoa(tC.storageIndex))
 
-			var extensions = map[config.ComponentID]component.Extension{}
+			var extensions = map[component.ID]component.Component{}
 			for i := 0; i < tC.numStorages; i++ {
-				extensions[config.NewComponentIDWithName("file_storage", strconv.Itoa(i))] = &mockStorageExtension{GetClientError: tC.getClientError}
+				extensions[component.NewIDWithName("file_storage", strconv.Itoa(i))] = &mockStorageExtension{GetClientError: tC.getClientError}
 			}
 			host := &mockHost{ext: extensions}
-			ownerID := config.NewComponentID("foo_exporter")
+			ownerID := component.NewID("foo_exporter")
 
 			// execute
-			client, err := toStorageClient(context.Background(), storageID, host, ownerID, config.TracesDataType)
+			client, err := toStorageClient(context.Background(), storageID, host, ownerID, component.DataTypeTraces)
 
 			// verify
 			if tC.expectedError != nil {
@@ -448,7 +458,7 @@ func TestGetRetrySettings(t *testing.T) {
 }
 
 func TestInvalidStorageExtensionType(t *testing.T) {
-	storageID := config.NewComponentIDWithName("extension", "extension")
+	storageID := component.NewIDWithName("extension", "extension")
 
 	// make a test extension
 	factory := componenttest.NewNopExtensionFactory()
@@ -456,14 +466,14 @@ func TestInvalidStorageExtensionType(t *testing.T) {
 	settings := componenttest.NewNopExtensionCreateSettings()
 	extension, err := factory.CreateExtension(context.Background(), settings, extConfig)
 	assert.NoError(t, err)
-	var extensions = map[config.ComponentID]component.Extension{
+	var extensions = map[component.ID]component.Component{
 		storageID: extension,
 	}
 	host := &mockHost{ext: extensions}
-	ownerID := config.NewComponentID("foo_exporter")
+	ownerID := component.NewID("foo_exporter")
 
 	// execute
-	client, err := toStorageClient(context.Background(), storageID, host, ownerID, config.TracesDataType)
+	client, err := toStorageClient(context.Background(), storageID, host, ownerID, component.DataTypeTraces)
 
 	// we should get an error about the extension type
 	assert.ErrorIs(t, err, errWrongExtensionType)
@@ -476,7 +486,8 @@ func TestQueuedRetry_RequeuingEnabled(t *testing.T) {
 	qCfg.NumConsumers = 1
 	rCfg := NewDefaultRetrySettings()
 	rCfg.MaxElapsedTime = time.Nanosecond // we don't want to retry at all, but requeue instead
-	be := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	be, err := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	require.NoError(t, err)
 	ocs := newObservabilityConsumerSender(be.qrSender.consumerSender)
 	be.qrSender.consumerSender = ocs
 	be.qrSender.requeuingEnabled = true
@@ -507,7 +518,8 @@ func TestQueuedRetry_RequeuingEnabledQueueFull(t *testing.T) {
 	qCfg.QueueSize = 0
 	rCfg := NewDefaultRetrySettings()
 	rCfg.MaxElapsedTime = time.Nanosecond // we don't want to retry at all, but requeue instead
-	be := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	be, err := newBaseExporter(&defaultExporterCfg, componenttest.NewNopExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	require.NoError(t, err)
 	be.qrSender.requeuingEnabled = true
 	require.NoError(t, be.Start(context.Background(), componenttest.NewNopHost()))
 	t.Cleanup(func() {
@@ -527,12 +539,13 @@ func TestQueuedRetryPersistenceEnabled(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, tt.Shutdown(context.Background())) })
 
 	qCfg := NewDefaultQueueSettings()
-	storageID := config.NewComponentIDWithName("file_storage", "storage")
+	storageID := component.NewIDWithName("file_storage", "storage")
 	qCfg.StorageID = &storageID // enable persistence
 	rCfg := NewDefaultRetrySettings()
-	be := newBaseExporter(&defaultExporterCfg, tt.ToExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	be, err := newBaseExporter(&defaultExporterCfg, tt.ToExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	require.NoError(t, err)
 
-	var extensions = map[config.ComponentID]component.Extension{
+	var extensions = map[component.ID]component.Component{
 		storageID: &mockStorageExtension{},
 	}
 	host := &mockHost{ext: extensions}
@@ -549,12 +562,13 @@ func TestQueuedRetryPersistenceEnabledStorageError(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, tt.Shutdown(context.Background())) })
 
 	qCfg := NewDefaultQueueSettings()
-	storageID := config.NewComponentIDWithName("file_storage", "storage")
+	storageID := component.NewIDWithName("file_storage", "storage")
 	qCfg.StorageID = &storageID // enable persistence
 	rCfg := NewDefaultRetrySettings()
-	be := newBaseExporter(&defaultExporterCfg, tt.ToExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	be, err := newBaseExporter(&defaultExporterCfg, tt.ToExporterCreateSettings(), fromOptions(WithRetry(rCfg), WithQueue(qCfg)), "", nopRequestUnmarshaler())
+	require.NoError(t, err)
 
-	var extensions = map[config.ComponentID]component.Extension{
+	var extensions = map[component.ID]component.Component{
 		storageID: &mockStorageExtension{GetClientError: storageError},
 	}
 	host := &mockHost{ext: extensions}
@@ -732,10 +746,10 @@ func tagsMatchLabelKeys(tags []tag.Tag, keys []metricdata.LabelKey, labels []met
 
 type mockHost struct {
 	component.Host
-	ext map[config.ComponentID]component.Extension
+	ext map[component.ID]component.Component
 }
 
-func (nh *mockHost) GetExtensions() map[config.ComponentID]component.Extension {
+func (nh *mockHost) GetExtensions() map[component.ID]component.Component {
 	return nh.ext
 }
 
@@ -751,7 +765,7 @@ func (mse *mockStorageExtension) Shutdown(_ context.Context) error {
 	return nil
 }
 
-func (mse *mockStorageExtension) GetClient(_ context.Context, _ component.Kind, _ config.ComponentID, _ string) (storage.Client, error) {
+func (mse *mockStorageExtension) GetClient(_ context.Context, _ component.Kind, _ component.ID, _ string) (storage.Client, error) {
 	if mse.GetClientError != nil {
 		return nil, mse.GetClientError
 	}

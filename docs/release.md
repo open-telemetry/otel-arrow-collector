@@ -125,14 +125,27 @@ When considering making a bugfix release on the `v0.N.x` release cycle, the bug 
 
 The OpenTelemetry Collector maintainers will ultimately have the responsibility to assess if a given bug fulfills all the necessary criteria and may grant exceptions in a case-by-case basis.
 
+### Bugfix release procedure
+
+The following documents the procedure to release a bugfix
+
+1. Create a pull request against the `release/<release-series>` (e.g. `release/v0.45.x`) branch to apply the fix.
+2. Create a pull request to update version number against the `release/<release-series>` branch.
+3. Once those changes have been merged, create a pull request to the `main` branch from the `release/<release-series>` branch.
+4. Enable the **Merge pull request** setting in the repository's **Settings** tab.
+5. Tag all the modules with the new release version by running the `make add-tag` command (e.g. `make add-tag TAG=v0.55.0`). Push them to `open-telemetry/opentelemetry-collector` with `make push-tag TAG=v0.55.0`. Wait for the new tag build to pass successfully.
+6. **IMPORTANT**: The pull request to bring the changes from the release branch *MUST* be merged using the **Merge pull request** method, and *NOT* squashed using “**Squash and merge**”. This is important as it allows us to ensure the commit SHA from the release branch is also on the main branch. **Not following this step will cause much go dependency sadness.**
+7. Once the branch has been merged, it will be auto-deleted. Restore the release branch via GitHub.
+8. Once the patch is release, disable the **Merge pull request** setting.
+
 ## Release schedule
 
 | Date       | Version | Release manager |
 |------------|---------|-----------------|
-| 2022-10-26 | v0.63.0 | @dmitryax       |
-| 2022-11-09 | v0.64.0 | @jpkrohling     |
-| 2022-11-23 | v0.65.0 | @tigrannajaryan |
+| 2022-11-21 | v0.65.0 | @tigrannajaryan |
 | 2022-12-07 | v0.66.0 | @Aneurysm9      |
 | 2022-12-21 | v0.67.0 | @mx-psi         |
-| 2023-01-04 | v0.68.0 | @codeboten      |
-| 2023-01-16 | v0.69.0 | @bogdandrutu    |
+| 2023-01-04 | v0.68.0 | @dmitryax       |
+| 2023-01-18 | v0.69.0 | @bogdandrutu    |
+| 2022-02-01 | v0.70.0 | @codeboten      |
+| 2022-02-15 | v0.71.0 | @jpkrohling     |
