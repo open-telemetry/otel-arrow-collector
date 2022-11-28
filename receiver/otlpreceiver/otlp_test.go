@@ -186,7 +186,7 @@ func TestJsonHttp(t *testing.T) {
 func TestHandleInvalidRequests(t *testing.T) {
 	endpoint := testutil.GetAvailableLocalAddress(t)
 	cfg := &Config{
-		ReceiverSettings: config.NewReceiverSettings(config.NewComponentID(typeStr)),
+		ReceiverSettings: config.NewReceiverSettings(component.NewID(typeStr)),
 		Protocols:        Protocols{HTTP: &confighttp.HTTPServerSettings{Endpoint: endpoint}},
 	}
 
@@ -702,7 +702,7 @@ func TestOTLPReceiverTrace_HandleNextConsumerResponse(t *testing.T) {
 
 				require.Equal(t, test.expectedReceivedBatches, len(sink.AllTraces()))
 
-				require.NoError(t, obsreporttest.CheckReceiverTraces(tt, config.NewComponentIDWithName(typeStr, exporter.receiverTag), "grpc", int64(test.expectedReceivedBatches), int64(test.expectedIngestionBlockedRPCs)))
+				require.NoError(t, obsreporttest.CheckReceiverTraces(tt, component.NewIDWithName(typeStr, exporter.receiverTag), "grpc", int64(test.expectedReceivedBatches), int64(test.expectedIngestionBlockedRPCs)))
 			})
 		}
 	}
@@ -710,7 +710,7 @@ func TestOTLPReceiverTrace_HandleNextConsumerResponse(t *testing.T) {
 
 func TestGRPCInvalidTLSCredentials(t *testing.T) {
 	cfg := &Config{
-		ReceiverSettings: config.NewReceiverSettings(config.NewComponentID(typeStr)),
+		ReceiverSettings: config.NewReceiverSettings(component.NewID(typeStr)),
 		Protocols: Protocols{
 			GRPC: &configgrpc.GRPCServerSettings{
 				NetAddr: confignet.NetAddr{
@@ -781,7 +781,7 @@ func TestGRPCMaxRecvSize(t *testing.T) {
 
 func TestHTTPInvalidTLSCredentials(t *testing.T) {
 	cfg := &Config{
-		ReceiverSettings: config.NewReceiverSettings(config.NewComponentID(typeStr)),
+		ReceiverSettings: config.NewReceiverSettings(component.NewID(typeStr)),
 		Protocols: Protocols{
 			HTTP: &confighttp.HTTPServerSettings{
 				Endpoint: testutil.GetAvailableLocalAddress(t),
@@ -810,7 +810,7 @@ func testHTTPMaxRequestBodySizeJSON(t *testing.T, payload []byte, size int, expe
 	endpoint := testutil.GetAvailableLocalAddress(t)
 	url := fmt.Sprintf("http://%s/v1/traces", endpoint)
 	cfg := &Config{
-		ReceiverSettings: config.NewReceiverSettings(config.NewComponentID(typeStr)),
+		ReceiverSettings: config.NewReceiverSettings(component.NewID(typeStr)),
 		Protocols: Protocols{
 			HTTP: &confighttp.HTTPServerSettings{
 				Endpoint:           endpoint,

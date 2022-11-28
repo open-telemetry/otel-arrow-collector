@@ -32,7 +32,7 @@ import (
 
 // ScraperControllerSettings defines common settings for a scraper controller
 // configuration. Scraper controller receivers can embed this struct, instead
-// of config.ReceiverSettings, and extend it with more fields if needed.
+// of component.ReceiverSettings, and extend it with more fields if needed.
 type ScraperControllerSettings struct {
 	config.ReceiverSettings `mapstructure:",squash"` // squash ensures fields are correctly decoded in embedded struct
 	CollectionInterval      time.Duration            `mapstructure:"collection_interval"`
@@ -40,9 +40,9 @@ type ScraperControllerSettings struct {
 
 // NewDefaultScraperControllerSettings returns default scraper controller
 // settings with a collection interval of one minute.
-func NewDefaultScraperControllerSettings(cfgType config.Type) ScraperControllerSettings {
+func NewDefaultScraperControllerSettings(cfgType component.Type) ScraperControllerSettings {
 	return ScraperControllerSettings{
-		ReceiverSettings:   config.NewReceiverSettings(config.NewComponentID(cfgType)),
+		ReceiverSettings:   config.NewReceiverSettings(component.NewID(cfgType)),
 		CollectionInterval: time.Minute,
 	}
 }
@@ -71,12 +71,13 @@ func WithTickerChannel(tickerCh <-chan time.Time) ScraperControllerOption {
 }
 
 type controller struct {
-	id                 config.ComponentID
+	id                 component.ID
 	logger             *zap.Logger
 	collectionInterval time.Duration
 	nextConsumer       consumer.Metrics
 
-	scrapers []Scraper
+	scrapers    []Scraper
+	obsScrapers []*obsreport.Scraper
 
 	tickerCh <-chan time.Time
 
@@ -94,13 +95,22 @@ func NewScraperControllerReceiver(
 	set component.ReceiverCreateSettings,
 	nextConsumer consumer.Metrics,
 	options ...ScraperControllerOption,
-) (component.Receiver, error) {
+) (component.Component, error) {
 	if nextConsumer == nil {
 		return nil, component.ErrNilNextConsumer
 	}
 
 	if cfg.CollectionInterval <= 0 {
 		return nil, errors.New("collection_interval must be a positive duration")
+	}
+
+	obsrecv, err := obsreport.NewReceiver(obsreport.ReceiverSettings{
+		ReceiverID:             cfg.ID(),
+		Transport:              "",
+		ReceiverCreateSettings: set,
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	sc := &controller{
@@ -110,16 +120,27 @@ func NewScraperControllerReceiver(
 		nextConsumer:       nextConsumer,
 		done:               make(chan struct{}),
 		terminated:         make(chan struct{}),
-		obsrecv: obsreport.NewReceiver(obsreport.ReceiverSettings{
-			ReceiverID:             cfg.ID(),
-			Transport:              "",
-			ReceiverCreateSettings: set,
-		}),
-		recvSettings: set,
+		obsrecv:            obsrecv,
+		recvSettings:       set,
 	}
 
 	for _, op := range options {
 		op(sc)
+	}
+
+	sc.obsScrapers = make([]*obsreport.Scraper, len(sc.scrapers))
+	for i, scraper := range sc.scrapers {
+		scrp, err := obsreport.NewScraper(obsreport.ScraperSettings{
+			ReceiverID:             sc.id,
+			Scraper:                scraper.ID(),
+			ReceiverCreateSettings: sc.recvSettings,
+		})
+
+		sc.obsScrapers[i] = scrp
+
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return sc, nil
@@ -184,12 +205,8 @@ func (sc *controller) startScraping() {
 func (sc *controller) scrapeMetricsAndReport(ctx context.Context) {
 	metrics := pmetric.NewMetrics()
 
-	for _, scraper := range sc.scrapers {
-		scrp := obsreport.NewScraper(obsreport.ScraperSettings{
-			ReceiverID:             sc.id,
-			Scraper:                scraper.ID(),
-			ReceiverCreateSettings: sc.recvSettings,
-		})
+	for i, scraper := range sc.scrapers {
+		scrp := sc.obsScrapers[i]
 		ctx = scrp.StartMetricsOp(ctx)
 		md, err := scraper.Scrape(ctx)
 

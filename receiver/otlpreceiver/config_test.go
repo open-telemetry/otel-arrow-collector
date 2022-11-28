@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/config/confighttp"
@@ -36,7 +37,7 @@ func TestUnmarshalDefaultConfig(t *testing.T) {
 	require.NoError(t, err)
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig()
-	assert.NoError(t, config.UnmarshalReceiver(cm, cfg))
+	assert.NoError(t, component.UnmarshalReceiverConfig(cm, cfg))
 	assert.Equal(t, factory.CreateDefaultConfig(), cfg)
 }
 
@@ -45,7 +46,7 @@ func TestUnmarshalConfigOnlyGRPC(t *testing.T) {
 	require.NoError(t, err)
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig()
-	assert.NoError(t, config.UnmarshalReceiver(cm, cfg))
+	assert.NoError(t, component.UnmarshalReceiverConfig(cm, cfg))
 
 	defaultOnlyGRPC := factory.CreateDefaultConfig().(*Config)
 	defaultOnlyGRPC.HTTP = nil
@@ -57,7 +58,7 @@ func TestUnmarshalConfigOnlyHTTP(t *testing.T) {
 	require.NoError(t, err)
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig()
-	assert.NoError(t, config.UnmarshalReceiver(cm, cfg))
+	assert.NoError(t, component.UnmarshalReceiverConfig(cm, cfg))
 
 	defaultOnlyHTTP := factory.CreateDefaultConfig().(*Config)
 	defaultOnlyHTTP.GRPC = nil
@@ -69,7 +70,7 @@ func TestUnmarshalConfigOnlyHTTPNull(t *testing.T) {
 	require.NoError(t, err)
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig()
-	assert.NoError(t, config.UnmarshalReceiver(cm, cfg))
+	assert.NoError(t, component.UnmarshalReceiverConfig(cm, cfg))
 
 	defaultOnlyHTTP := factory.CreateDefaultConfig().(*Config)
 	defaultOnlyHTTP.GRPC = nil
@@ -81,7 +82,7 @@ func TestUnmarshalConfigOnlyHTTPEmptyMap(t *testing.T) {
 	require.NoError(t, err)
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig()
-	assert.NoError(t, config.UnmarshalReceiver(cm, cfg))
+	assert.NoError(t, component.UnmarshalReceiverConfig(cm, cfg))
 
 	defaultOnlyHTTP := factory.CreateDefaultConfig().(*Config)
 	defaultOnlyHTTP.GRPC = nil
@@ -93,10 +94,10 @@ func TestUnmarshalConfig(t *testing.T) {
 	require.NoError(t, err)
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig()
-	assert.NoError(t, config.UnmarshalReceiver(cm, cfg))
+	assert.NoError(t, component.UnmarshalReceiverConfig(cm, cfg))
 	assert.Equal(t,
 		&Config{
-			ReceiverSettings: config.NewReceiverSettings(config.NewComponentID(typeStr)),
+			ReceiverSettings: config.NewReceiverSettings(component.NewID(typeStr)),
 			Protocols: Protocols{
 				GRPC: &configgrpc.GRPCServerSettings{
 					NetAddr: confignet.NetAddr{
@@ -153,10 +154,10 @@ func TestUnmarshalConfigUnix(t *testing.T) {
 	require.NoError(t, err)
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig()
-	assert.NoError(t, config.UnmarshalReceiver(cm, cfg))
+	assert.NoError(t, component.UnmarshalReceiverConfig(cm, cfg))
 	assert.Equal(t,
 		&Config{
-			ReceiverSettings: config.NewReceiverSettings(config.NewComponentID(typeStr)),
+			ReceiverSettings: config.NewReceiverSettings(component.NewID(typeStr)),
 			Protocols: Protocols{
 				GRPC: &configgrpc.GRPCServerSettings{
 					NetAddr: confignet.NetAddr{
@@ -181,7 +182,7 @@ func TestUnmarshalConfigTypoDefaultProtocol(t *testing.T) {
 	require.NoError(t, err)
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig()
-	assert.EqualError(t, config.UnmarshalReceiver(cm, cfg), "1 error(s) decoding:\n\n* 'protocols' has invalid keys: htttp")
+	assert.EqualError(t, component.UnmarshalReceiverConfig(cm, cfg), "1 error(s) decoding:\n\n* 'protocols' has invalid keys: htttp")
 }
 
 func TestUnmarshalConfigInvalidProtocol(t *testing.T) {
@@ -189,7 +190,7 @@ func TestUnmarshalConfigInvalidProtocol(t *testing.T) {
 	require.NoError(t, err)
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig()
-	assert.EqualError(t, config.UnmarshalReceiver(cm, cfg), "1 error(s) decoding:\n\n* 'protocols' has invalid keys: thrift")
+	assert.EqualError(t, component.UnmarshalReceiverConfig(cm, cfg), "1 error(s) decoding:\n\n* 'protocols' has invalid keys: thrift")
 }
 
 func TestUnmarshalConfigEmptyProtocols(t *testing.T) {
@@ -197,8 +198,8 @@ func TestUnmarshalConfigEmptyProtocols(t *testing.T) {
 	require.NoError(t, err)
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig()
-	assert.NoError(t, config.UnmarshalReceiver(cm, cfg))
-	assert.EqualError(t, cfg.Validate(), "must specify at least one protocol when using the OTLP receiver")
+	assert.NoError(t, component.UnmarshalReceiverConfig(cm, cfg))
+	assert.EqualError(t, component.ValidateConfig(cfg), "must specify at least one protocol when using the OTLP receiver")
 }
 
 func TestUnmarshalConfigArrowWithoutGRPC(t *testing.T) {
@@ -206,13 +207,13 @@ func TestUnmarshalConfigArrowWithoutGRPC(t *testing.T) {
 	require.NoError(t, err)
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig()
-	assert.NoError(t, config.UnmarshalReceiver(cm, cfg))
-	assert.EqualError(t, cfg.Validate(), "must specify at gRPC protocol when using the OTLP+Arrow receiver")
+	assert.NoError(t, component.UnmarshalReceiverConfig(cm, cfg))
+	assert.EqualError(t, component.ValidateConfig(cfg), "must specify at gRPC protocol when using the OTLP+Arrow receiver")
 }
 
 func TestUnmarshalConfigEmpty(t *testing.T) {
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig()
-	assert.NoError(t, config.UnmarshalReceiver(confmap.New(), cfg))
-	assert.EqualError(t, cfg.Validate(), "must specify at least one protocol when using the OTLP receiver")
+	assert.NoError(t, component.UnmarshalReceiverConfig(confmap.New(), cfg))
+	assert.EqualError(t, component.ValidateConfig(cfg), "must specify at least one protocol when using the OTLP receiver")
 }

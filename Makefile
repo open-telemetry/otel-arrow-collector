@@ -47,7 +47,7 @@ version:
 	@echo ${VERSION}
 
 .PHONY: all
-all: checklicense checkdoc misspell goimpi golint gotest
+all: checklicense checkdoc misspell goimpi goporto multimod-verify golint gotest
 
 all-modules:
 	@echo $(ALL_MODULES) | tr ' ' '\n' | sort
@@ -70,7 +70,7 @@ gotest-with-cover:
 	$(GOCOVMERGE) $$(find . -name coverage.out) > coverage.txt
 
 .PHONY: goporto
-goporto:
+goporto: install-tools
 	porto -w --include-internal ./
 
 .PHONY: golint
@@ -78,7 +78,7 @@ golint:
 	@$(MAKE) for-all-target TARGET="lint"
 
 .PHONY: goimpi
-goimpi:
+goimpi: install-tools
 	@$(MAKE) for-all-target TARGET="impi"
 
 .PHONY: gofmt
@@ -325,10 +325,18 @@ gensemconv:
 check-contrib:
 	@echo Setting contrib at $(CONTRIB_PATH) to use this core checkout
 	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -replace go.opentelemetry.io/collector=$(CURDIR)"
+	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -replace go.opentelemetry.io/collector/component=$(CURDIR)/component"
+	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -replace go.opentelemetry.io/collector/consumer=$(CURDIR)/consumer"
 	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -replace go.opentelemetry.io/collector/exporter/loggingexporter=$(CURDIR)/exporter/loggingexporter"
 	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -replace go.opentelemetry.io/collector/exporter/otlpexporter=$(CURDIR)/exporter/otlpexporter"
 	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -replace go.opentelemetry.io/collector/exporter/otlphttpexporter=$(CURDIR)/exporter/otlphttpexporter"
+	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -replace go.opentelemetry.io/collector/extension/ballastextension=$(CURDIR)/extension/ballastextension"
+	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -replace go.opentelemetry.io/collector/extension/zpagesextension=$(CURDIR)/extension/zpagesextension"
+	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -replace go.opentelemetry.io/collector/featuregate=$(CURDIR)/featuregate"
 	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -replace go.opentelemetry.io/collector/pdata=$(CURDIR)/pdata"
+	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -replace go.opentelemetry.io/collector/processor/batchprocessor=$(CURDIR)/processor/batchprocessor"
+	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -replace go.opentelemetry.io/collector/processor/memorylimiterprocessor=$(CURDIR)/processor/memorylimiterprocessor"
+	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -replace go.opentelemetry.io/collector/receiver/otlpreceiver=$(CURDIR)/receiver/otlpreceiver"
 	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -replace go.opentelemetry.io/collector/semconv=$(CURDIR)/semconv"
 	@$(MAKE) -C $(CONTRIB_PATH) -j2 gotidy
 	@$(MAKE) -C $(CONTRIB_PATH) test
@@ -341,10 +349,18 @@ check-contrib:
 restore-contrib:
 	@echo Restoring contrib at $(CONTRIB_PATH) to its original state
 	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -dropreplace go.opentelemetry.io/collector"
+	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -dropreplace go.opentelemetry.io/collector/component"
+	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -dropreplace go.opentelemetry.io/collector/consumer"
 	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -dropreplace go.opentelemetry.io/collector/exporter/loggingexporter"
 	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -dropreplace go.opentelemetry.io/collector/exporter/otlpexporter"
 	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -dropreplace go.opentelemetry.io/collector/exporter/otlphttpexporter"
+	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -dropreplace go.opentelemetry.io/collector/extension/ballastextension"
+	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -dropreplace go.opentelemetry.io/collector/extension/zpagestextension"
+	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -dropreplace go.opentelemetry.io/collector/featuregate"
 	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -dropreplace go.opentelemetry.io/collector/pdata"
+	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -dropreplace go.opentelemetry.io/collector/processor/batchprocessor"
+	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -dropreplace go.opentelemetry.io/collector/processor/memorylimiterprocessor"
+	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -dropreplace go.opentelemetry.io/collector/receiver/otlpreceiver"
 	@$(MAKE) -C $(CONTRIB_PATH) for-all CMD="$(GOCMD) mod edit -dropreplace go.opentelemetry.io/collector/semconv"
 	@$(MAKE) -C $(CONTRIB_PATH) -j2 gotidy
 
@@ -453,9 +469,9 @@ checklinks:
 		markdown-link-check -q -c ./.github/workflows/check_links_config.json || true
 
 # error message "failed to sync logger:  sync /dev/stderr: inappropriate ioctl for device"
-# is a known issue but does not affect function. 
+# is a known issue but does not affect function.
 .PHONY: crosslink
-crosslink: 
+crosslink:
 	@echo "Executing crosslink"
 	crosslink --root=$(shell pwd) --prune
 

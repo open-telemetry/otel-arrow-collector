@@ -32,7 +32,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
 	"go.opentelemetry.io/collector/exporter/otlpexporter/internal/arrow"
@@ -67,7 +66,7 @@ type exporter struct {
 
 // Crete new exporter and start it. The exporter will begin connecting but
 // this function may return before the connection is established.
-func newExporter(cfg config.Exporter, settings component.ExporterCreateSettings) (*exporter, error) {
+func newExporter(cfg component.ExporterConfig, set component.ExporterCreateSettings) (*exporter, error) {
 	oCfg := cfg.(*Config)
 
 	if oCfg.Endpoint == "" {
@@ -75,30 +74,22 @@ func newExporter(cfg config.Exporter, settings component.ExporterCreateSettings)
 	}
 
 	userAgent := fmt.Sprintf("%s/%s (%s/%s)",
-		settings.BuildInfo.Description, settings.BuildInfo.Version, runtime.GOOS, runtime.GOARCH)
+		set.BuildInfo.Description, set.BuildInfo.Version, runtime.GOOS, runtime.GOARCH)
 
 	if oCfg.Arrow != nil && oCfg.Arrow.Enabled {
 		userAgent += fmt.Sprintf(" ApacheArrow/%s (NumStreams/%d)", arrowPkg.PkgVersion, oCfg.Arrow.NumStreams)
 	}
 
-	return &exporter{config: oCfg, settings: settings, userAgent: userAgent}, nil
+	return &exporter{config: oCfg, settings: set, userAgent: userAgent}, nil
 }
 
 // start actually creates the gRPC connection. The client construction is deferred till this point as this
 // is the only place we get hold of Extensions which are required to construct auth round tripper.
-func (e *exporter) start(ctx context.Context, host component.Host) error {
-	dialOpts, err := e.config.GRPCClientSettings.ToDialOptions(host, e.settings.TelemetrySettings)
-	if err != nil {
-		return err
-	}
-	dialOpts = append(dialOpts, grpc.WithUserAgent(e.userAgent))
-
-	cc, err := grpc.DialContext(ctx, e.config.GRPCClientSettings.SanitizedEndpoint(), dialOpts...)
-	if err != nil {
+func (e *exporter) start(ctx context.Context, host component.Host) (err error) {
+	if e.clientConn, err = e.config.GRPCClientSettings.ToClientConn(ctx, host, e.settings.TelemetrySettings, grpc.WithUserAgent(e.userAgent)); err != nil {
 		return err
 	}
 
-	e.clientConn = cc
 	e.traceExporter = ptraceotlp.NewGRPCClient(e.clientConn)
 	e.metricExporter = pmetricotlp.NewGRPCClient(e.clientConn)
 	e.logExporter = plogotlp.NewGRPCClient(e.clientConn)

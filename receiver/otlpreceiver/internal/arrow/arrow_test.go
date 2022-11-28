@@ -32,7 +32,6 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
-	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/internal/testdata"
 	"go.opentelemetry.io/collector/pdata/plog"
@@ -287,8 +286,8 @@ func (ctc *commonTestCase) newErrorConsumer() arrowRecord.ConsumerAPI {
 }
 
 func (ctc *commonTestCase) start(newConsumer func() arrowRecord.ConsumerAPI) {
-	rcvr := New(
-		config.NewComponentID("arrowtest"),
+	rcvr, err := New(
+		component.NewID("arrowtest"),
 		ctc.consumers,
 		component.ReceiverCreateSettings{
 			TelemetrySettings: ctc.telset,
@@ -296,7 +295,11 @@ func (ctc *commonTestCase) start(newConsumer func() arrowRecord.ConsumerAPI) {
 		},
 		newConsumer,
 	)
-
+	if err != nil {
+		// it would be because obsreport.NewReceiver failed, this is
+		// not tested here.
+		panic("new failure not tested")
+	}
 	go func() {
 		ctc.streamErr <- rcvr.ArrowStream(ctc.stream)
 	}()

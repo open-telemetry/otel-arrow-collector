@@ -23,7 +23,6 @@ import (
 	"go.uber.org/zap"
 
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/obsreport"
@@ -57,22 +56,25 @@ type Receiver struct {
 
 // New creates a new Receiver reference.
 func New(
-	id config.ComponentID,
+	id component.ID,
 	cs Consumers,
 	set component.ReceiverCreateSettings,
 	newConsumer func() arrowRecord.ConsumerAPI,
-) *Receiver {
-	obs := obsreport.NewReceiver(obsreport.ReceiverSettings{
+) (*Receiver, error) {
+	obs, err := obsreport.NewReceiver(obsreport.ReceiverSettings{
 		ReceiverID:             id,
 		Transport:              receiverTransport,
 		ReceiverCreateSettings: set,
 	})
+	if err != nil {
+		return nil, err
+	}
 	return &Receiver{
 		Consumers:   cs,
 		obsrecv:     obs,
 		telemetry:   set.TelemetrySettings,
 		newConsumer: newConsumer,
-	}
+	}, nil
 }
 
 func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStreamServer) error {
