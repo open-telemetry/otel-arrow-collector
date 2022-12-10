@@ -7,13 +7,14 @@ require (
 	github.com/f5/otel-arrow-adapter v0.0.0-20221117192416-4be8d64bf483
 	github.com/golang/mock v1.6.0
 	github.com/stretchr/testify v1.8.1
-	go.opentelemetry.io/collector v0.65.0
-	go.opentelemetry.io/collector/component v0.65.0
-	go.opentelemetry.io/collector/consumer v0.65.0
-	go.opentelemetry.io/collector/pdata v0.65.0
+	go.opentelemetry.io/collector v0.67.0
+	go.opentelemetry.io/collector/component v0.67.0
+	go.opentelemetry.io/collector/confmap v0.67.0
+	go.opentelemetry.io/collector/consumer v0.67.0
+	go.opentelemetry.io/collector/pdata v1.0.0-rc1
 	go.uber.org/atomic v1.10.0
 	go.uber.org/multierr v1.8.0
-	go.uber.org/zap v1.23.0
+	go.uber.org/zap v1.24.0
 	google.golang.org/genproto v0.0.0-20221018160656-63c7b68cfc55
 	google.golang.org/grpc v1.51.0
 	google.golang.org/protobuf v1.28.1
@@ -51,14 +52,14 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.opencensus.io v0.24.0 // indirect
-	go.opentelemetry.io/collector/featuregate v0.65.0 // indirect
+	go.opentelemetry.io/collector/featuregate v0.67.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.36.4 // indirect
 	go.opentelemetry.io/otel v1.11.1 // indirect
 	go.opentelemetry.io/otel/metric v0.33.0 // indirect
 	go.opentelemetry.io/otel/trace v1.11.1 // indirect
 	golang.org/x/mod v0.6.0 // indirect
 	golang.org/x/net v0.1.0 // indirect
-	golang.org/x/sys v0.2.0 // indirect
+	golang.org/x/sys v0.3.0 // indirect
 	golang.org/x/text v0.4.0 // indirect
 	golang.org/x/tools v0.2.0 // indirect
 	golang.org/x/xerrors v0.0.0-20220609144429-65e65417b02f // indirect
@@ -68,6 +69,8 @@ require (
 replace go.opentelemetry.io/collector => ../../
 
 replace go.opentelemetry.io/collector/component => ../../component
+
+replace go.opentelemetry.io/collector/confmap => ../../confmap
 
 replace go.opentelemetry.io/collector/featuregate => ../../featuregate
 

@@ -20,32 +20,14 @@ import (
 // ExtensionSettings defines common settings for a component.Extension configuration.
 // Specific processors can embed this struct and extend it with more fields if needed.
 //
-// It is highly recommended to "override" the Validate() function.
-//
 // When embedded in the extension config, it must be with `mapstructure:",squash"` tag.
 type ExtensionSettings struct {
-	id component.ID `mapstructure:"-"`
-	component.ExtensionConfig
+	settings
 }
 
 // NewExtensionSettings return a new ExtensionSettings with the given ID.
 func NewExtensionSettings(id component.ID) ExtensionSettings {
-	return ExtensionSettings{id: id}
+	return ExtensionSettings{settings: newSettings(id)}
 }
 
-var _ component.ExtensionConfig = (*ExtensionSettings)(nil)
-
-// ID returns the receiver ID.
-func (es *ExtensionSettings) ID() component.ID {
-	return es.id
-}
-
-// SetIDName sets the receiver name.
-func (es *ExtensionSettings) SetIDName(idName string) {
-	es.id = component.NewIDWithName(es.id.Type(), idName)
-}
-
-// Deprecated: [v0.65.0] use component.ValidateConfig.
-func (es *ExtensionSettings) Validate() error {
-	return nil
-}
+var _ component.Config = (*ExtensionSettings)(nil)

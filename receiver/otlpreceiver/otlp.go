@@ -35,6 +35,7 @@ import (
 	"go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp"
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
 	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/arrow"
+	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/logs"
 	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/metrics"
 	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/trace"
@@ -53,13 +54,13 @@ type otlpReceiver struct {
 	arrowReceiver   *arrow.Receiver
 	shutdownWG      sync.WaitGroup
 
-	settings component.ReceiverCreateSettings
+	settings receiver.CreateSettings
 }
 
 // newOtlpReceiver just creates the OpenTelemetry receiver services. It is the caller's
 // responsibility to invoke the respective Start*Reception methods as well
 // as the various Stop*Reception methods to end it.
-func newOtlpReceiver(cfg *Config, settings component.ReceiverCreateSettings) *otlpReceiver {
+func newOtlpReceiver(cfg *Config, settings receiver.CreateSettings) *otlpReceiver {
 	r := &otlpReceiver{
 		cfg:      cfg,
 		settings: settings,
@@ -189,7 +190,7 @@ func (r *otlpReceiver) registerTraceConsumer(tc consumer.Traces) error {
 		return component.ErrNilNextConsumer
 	}
 	var err error
-	r.traceReceiver, err = trace.New(r.cfg.ID(), tc, r.settings)
+	r.traceReceiver, err = trace.New(tc, r.settings)
 	if err != nil {
 		return err
 	}
@@ -217,7 +218,7 @@ func (r *otlpReceiver) registerMetricsConsumer(mc consumer.Metrics) error {
 		return component.ErrNilNextConsumer
 	}
 	var err error
-	r.metricsReceiver, err = metrics.New(r.cfg.ID(), mc, r.settings)
+	r.metricsReceiver, err = metrics.New(mc, r.settings)
 	if err != nil {
 		return err
 	}
@@ -246,7 +247,7 @@ func (r *otlpReceiver) registerLogsConsumer(lc consumer.Logs) error {
 		return component.ErrNilNextConsumer
 	}
 	var err error
-	r.logReceiver, err = logs.New(r.cfg.ID(), lc, r.settings)
+	r.logReceiver, err = logs.New(lc, r.settings)
 	if err != nil {
 		return err
 	}

@@ -33,6 +33,7 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer/consumererror"
+	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
 	"go.opentelemetry.io/collector/exporter/otlpexporter/internal/arrow"
 	"go.opentelemetry.io/collector/pdata/plog"
@@ -43,7 +44,7 @@ import (
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
 )
 
-type exporter struct {
+type baseExporter struct {
 	// Input configuration.
 	config *Config
 
@@ -66,7 +67,7 @@ type exporter struct {
 
 // Crete new exporter and start it. The exporter will begin connecting but
 // this function may return before the connection is established.
-func newExporter(cfg component.ExporterConfig, set component.ExporterCreateSettings) (*exporter, error) {
+func newExporter(cfg component.Config, set exporter.CreateSettings) (*baseExporter, error) {
 	oCfg := cfg.(*Config)
 
 	if oCfg.Endpoint == "" {
@@ -80,16 +81,15 @@ func newExporter(cfg component.ExporterConfig, set component.ExporterCreateSetti
 		userAgent += fmt.Sprintf(" ApacheArrow/%s (NumStreams/%d)", arrowPkg.PkgVersion, oCfg.Arrow.NumStreams)
 	}
 
-	return &exporter{config: oCfg, settings: set, userAgent: userAgent}, nil
+	return &baseExporter{config: oCfg, settings: set.TelemetrySettings, userAgent: userAgent}, nil
 }
 
 // start actually creates the gRPC connection. The client construction is deferred till this point as this
 // is the only place we get hold of Extensions which are required to construct auth round tripper.
-func (e *exporter) start(ctx context.Context, host component.Host) (err error) {
-	if e.clientConn, err = e.config.GRPCClientSettings.ToClientConn(ctx, host, e.settings.TelemetrySettings, grpc.WithUserAgent(e.userAgent)); err != nil {
+func (e *baseExporter) start(ctx context.Context, host component.Host) (err error) {
+	if e.clientConn, err = e.config.GRPCClientSettings.ToClientConn(ctx, host, e.settings, grpc.WithUserAgent(e.userAgent)); err != nil {
 		return err
 	}
-
 	e.traceExporter = ptraceotlp.NewGRPCClient(e.clientConn)
 	e.metricExporter = pmetricotlp.NewGRPCClient(e.clientConn)
 	e.logExporter = plogotlp.NewGRPCClient(e.clientConn)
@@ -113,7 +113,7 @@ func (e *exporter) start(ctx context.Context, host component.Host) (err error) {
 	return nil
 }
 
-func (e *exporter) shutdown(ctx context.Context) error {
+func (e *baseExporter) shutdown(ctx context.Context) error {
 	var err error
 	if e.arrow != nil {
 		err = multierr.Append(err, e.arrow.Shutdown(ctx))
@@ -126,14 +126,21 @@ func (e *exporter) shutdown(ctx context.Context) error {
 // arrowSendAndWait gets an available stream and tries to send using
 // Arrow if it is configured.  A (false, nil) result indicates for the
 // caller to fall back to ordinary OTLP.
-func (e *exporter) arrowSendAndWait(ctx context.Context, data interface{}) (sent bool, _ error) {
+func (e *baseExporter) arrowSendAndWait(ctx context.Context, data interface{}) (sent bool, _ error) {
 	if e.arrow == nil {
 		return false, nil
 	}
 	return e.arrow.SendAndWait(ctx, data)
 }
 
-func (e *exporter) pushTraces(ctx context.Context, td ptrace.Traces) error {
+func (e *baseExporter) shutdown(context.Context) error {
+	if e.clientConn != nil {
+		return e.clientConn.Close()
+	}
+	return nil
+}
+
+func (e *baseExporter) pushTraces(ctx context.Context, td ptrace.Traces) error {
 	if sent, err := e.arrowSendAndWait(ctx, td); err != nil {
 		return err
 	} else if sent {
@@ -144,7 +151,7 @@ func (e *exporter) pushTraces(ctx context.Context, td ptrace.Traces) error {
 	return processGRPCError(err)
 }
 
-func (e *exporter) pushMetrics(ctx context.Context, md pmetric.Metrics) error {
+func (e *baseExporter) pushMetrics(ctx context.Context, md pmetric.Metrics) error {
 	if sent, err := e.arrowSendAndWait(ctx, md); err != nil {
 		return err
 	} else if sent {
@@ -155,7 +162,7 @@ func (e *exporter) pushMetrics(ctx context.Context, md pmetric.Metrics) error {
 	return processGRPCError(err)
 }
 
-func (e *exporter) pushLogs(ctx context.Context, ld plog.Logs) error {
+func (e *baseExporter) pushLogs(ctx context.Context, ld plog.Logs) error {
 	if sent, err := e.arrowSendAndWait(ctx, ld); err != nil {
 		return err
 	} else if sent {
@@ -166,7 +173,7 @@ func (e *exporter) pushLogs(ctx context.Context, ld plog.Logs) error {
 	return processGRPCError(err)
 }
 
-func (e *exporter) enhanceContext(ctx context.Context) context.Context {
+func (e *baseExporter) enhanceContext(ctx context.Context) context.Context {
 	if e.metadata.Len() > 0 {
 		return metadata.NewOutgoingContext(ctx, e.metadata)
 	}

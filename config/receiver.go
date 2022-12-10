@@ -17,35 +17,17 @@ import (
 	"go.opentelemetry.io/collector/component"
 )
 
-// ReceiverSettings defines common settings for a component.Receiver configuration.
+// ReceiverSettings defines common settings for a receiver.Receiver configuration.
 // Specific receivers can embed this struct and extend it with more fields if needed.
-//
-// It is highly recommended to "override" the Validate() function.
 //
 // When embedded in the receiver config it must be with `mapstructure:",squash"` tag.
 type ReceiverSettings struct {
-	id component.ID `mapstructure:"-"`
-	component.ReceiverConfig
+	settings
 }
 
 // NewReceiverSettings return a new ReceiverSettings with the given ID.
 func NewReceiverSettings(id component.ID) ReceiverSettings {
-	return ReceiverSettings{id: id}
+	return ReceiverSettings{settings: newSettings(id)}
 }
 
-var _ component.ReceiverConfig = (*ReceiverSettings)(nil)
-
-// ID returns the receiver ID.
-func (rs *ReceiverSettings) ID() component.ID {
-	return rs.id
-}
-
-// SetIDName sets the receiver name.
-func (rs *ReceiverSettings) SetIDName(idName string) {
-	rs.id = component.NewIDWithName(rs.id.Type(), idName)
-}
-
-// Deprecated: [v0.65.0] Not needed anymore since the Validate() will be moved from Config interface to the optional ConfigValidator interface.
-func (rs *ReceiverSettings) Validate() error {
-	return nil
-}
+var _ component.Config = (*ReceiverSettings)(nil)

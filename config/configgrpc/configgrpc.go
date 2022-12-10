@@ -43,6 +43,7 @@ import (
 	"go.opentelemetry.io/collector/config/confignet"
 	"go.opentelemetry.io/collector/config/configtls"
 	"go.opentelemetry.io/collector/config/internal"
+	"go.opentelemetry.io/collector/extension/auth"
 )
 
 var errMetadataNotFound = errors.New("no request metadata found")
@@ -363,10 +364,10 @@ func (gss *GRPCServerSettings) toServerOption(host component.Host, settings comp
 		}
 
 		uInterceptors = append(uInterceptors, func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
-			return authUnaryServerInterceptor(ctx, req, info, handler, authenticator.Authenticate)
+			return authUnaryServerInterceptor(ctx, req, info, handler, authenticator)
 		})
 		sInterceptors = append(sInterceptors, func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-			return authStreamServerInterceptor(srv, ss, info, handler, authenticator.Authenticate)
+			return authStreamServerInterceptor(srv, ss, info, handler, authenticator)
 		})
 	}
 
@@ -437,13 +438,13 @@ func contextWithClient(ctx context.Context, includeMetadata bool) context.Contex
 	return client.NewContext(ctx, cl)
 }
 
-func authUnaryServerInterceptor(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler, authenticate configauth.AuthenticateFunc) (interface{}, error) {
+func authUnaryServerInterceptor(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler, server auth.Server) (interface{}, error) {
 	headers, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return nil, errMetadataNotFound
 	}
 
-	ctx, err := authenticate(ctx, headers)
+	ctx, err := server.Authenticate(ctx, headers)
 	if err != nil {
 		return nil, err
 	}
@@ -451,14 +452,14 @@ func authUnaryServerInterceptor(ctx context.Context, req interface{}, _ *grpc.Un
 	return handler(ctx, req)
 }
 
-func authStreamServerInterceptor(srv interface{}, stream grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler, authenticate configauth.AuthenticateFunc) error {
+func authStreamServerInterceptor(srv interface{}, stream grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler, server auth.Server) error {
 	ctx := stream.Context()
 	headers, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return errMetadataNotFound
 	}
 
-	ctx, err := authenticate(ctx, headers)
+	ctx, err := server.Authenticate(ctx, headers)
 	if err != nil {
 		return err
 	}

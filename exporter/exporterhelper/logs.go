@@ -21,6 +21,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/consumererror"
+	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal"
 	"go.opentelemetry.io/collector/pdata/plog"
 )
@@ -77,14 +78,14 @@ type logsExporter struct {
 	consumer.Logs
 }
 
-// NewLogsExporter creates a component.LogsExporter that records observability metrics and wraps every request with a Span.
+// NewLogsExporter creates a exporter.Logs that records observability metrics and wraps every request with a Span.
 func NewLogsExporter(
 	_ context.Context,
-	set component.ExporterCreateSettings,
-	cfg component.ExporterConfig,
+	set exporter.CreateSettings,
+	cfg component.Config,
 	pusher consumer.ConsumeLogsFunc,
 	options ...Option,
-) (component.LogsExporter, error) {
+) (exporter.Logs, error) {
 	if cfg == nil {
 		return nil, errNilConfig
 	}
@@ -98,7 +99,7 @@ func NewLogsExporter(
 	}
 
 	bs := fromOptions(options...)
-	be, err := newBaseExporter(cfg, set, bs, component.DataTypeLogs, newLogsRequestUnmarshalerFunc(pusher))
+	be, err := newBaseExporter(set, bs, component.DataTypeLogs, newLogsRequestUnmarshalerFunc(pusher))
 	if err != nil {
 		return nil, err
 	}

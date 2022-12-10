@@ -55,10 +55,14 @@ import (
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
+	"go.opentelemetry.io/collector/receiver"
+	"go.opentelemetry.io/collector/receiver/receivertest"
 	semconv "go.opentelemetry.io/collector/semconv/v1.5.0"
 )
 
 const otlpReceiverName = "receiver_test"
+
+var otlpReceiverID = component.NewIDWithName(typeStr, otlpReceiverName)
 
 var traceJSON = []byte(`
 	{
@@ -193,7 +197,7 @@ func TestHandleInvalidRequests(t *testing.T) {
 	// Traces
 	tr, err := NewFactory().CreateTracesReceiver(
 		context.Background(),
-		componenttest.NewNopReceiverCreateSettings(),
+		receivertest.NewNopCreateSettings(),
 		cfg,
 		consumertest.NewNop())
 	require.NoError(t, err)
@@ -203,7 +207,7 @@ func TestHandleInvalidRequests(t *testing.T) {
 	// Metrics
 	mr, err := NewFactory().CreateMetricsReceiver(
 		context.Background(),
-		componenttest.NewNopReceiverCreateSettings(),
+		receivertest.NewNopCreateSettings(),
 		cfg,
 		consumertest.NewNop())
 	require.NoError(t, err)
@@ -213,7 +217,7 @@ func TestHandleInvalidRequests(t *testing.T) {
 	// Logs
 	lr, err := NewFactory().CreateLogsReceiver(
 		context.Background(),
-		componenttest.NewNopReceiverCreateSettings(),
+		receivertest.NewNopCreateSettings(),
 		cfg,
 		consumertest.NewNop())
 	require.NoError(t, err)
@@ -669,7 +673,7 @@ func TestOTLPReceiverTrace_HandleNextConsumerResponse(t *testing.T) {
 	for _, exporter := range exporters {
 		for _, test := range tests {
 			t.Run(test.name+"/"+exporter.receiverTag, func(t *testing.T) {
-				tt, err := obsreporttest.SetupTelemetry()
+				tt, err := obsreporttest.SetupTelemetryWithID(component.NewIDWithName(typeStr, exporter.receiverTag))
 				require.NoError(t, err)
 				t.Cleanup(func() { require.NoError(t, tt.Shutdown(context.Background())) })
 
@@ -702,7 +706,7 @@ func TestOTLPReceiverTrace_HandleNextConsumerResponse(t *testing.T) {
 
 				require.Equal(t, test.expectedReceivedBatches, len(sink.AllTraces()))
 
-				require.NoError(t, obsreporttest.CheckReceiverTraces(tt, component.NewIDWithName(typeStr, exporter.receiverTag), "grpc", int64(test.expectedReceivedBatches), int64(test.expectedIngestionBlockedRPCs)))
+				require.NoError(t, tt.CheckReceiverTraces("grpc", int64(test.expectedReceivedBatches), int64(test.expectedIngestionBlockedRPCs)))
 			})
 		}
 	}
@@ -728,7 +732,7 @@ func TestGRPCInvalidTLSCredentials(t *testing.T) {
 
 	r, err := NewFactory().CreateTracesReceiver(
 		context.Background(),
-		componenttest.NewNopReceiverCreateSettings(),
+		receivertest.NewNopCreateSettings(),
 		cfg,
 		consumertest.NewNop())
 	require.NoError(t, err)
@@ -747,7 +751,7 @@ func TestGRPCMaxRecvSize(t *testing.T) {
 	cfg := factory.CreateDefaultConfig().(*Config)
 	cfg.GRPC.NetAddr.Endpoint = addr
 	cfg.HTTP = nil
-	ocr := newReceiver(t, factory, cfg, sink, nil)
+	ocr := newReceiver(t, factory, cfg, otlpReceiverID, sink, nil)
 
 	require.NotNil(t, ocr)
 	require.NoError(t, ocr.Start(context.Background(), componenttest.NewNopHost()))
@@ -761,7 +765,7 @@ func TestGRPCMaxRecvSize(t *testing.T) {
 	require.NoError(t, ocr.Shutdown(context.Background()))
 
 	cfg.GRPC.MaxRecvMsgSizeMiB = 100
-	ocr = newReceiver(t, factory, cfg, sink, nil)
+	ocr = newReceiver(t, factory, cfg, otlpReceiverID, sink, nil)
 
 	require.NotNil(t, ocr)
 	require.NoError(t, ocr.Start(context.Background(), componenttest.NewNopHost()))
@@ -797,7 +801,7 @@ func TestHTTPInvalidTLSCredentials(t *testing.T) {
 	// TLS is resolved during Start for HTTP.
 	r, err := NewFactory().CreateTracesReceiver(
 		context.Background(),
-		componenttest.NewNopReceiverCreateSettings(),
+		receivertest.NewNopCreateSettings(),
 		cfg,
 		consumertest.NewNop())
 	require.NoError(t, err)
@@ -821,7 +825,7 @@ func testHTTPMaxRequestBodySizeJSON(t *testing.T, payload []byte, size int, expe
 
 	r, err := NewFactory().CreateTracesReceiver(
 		context.Background(),
-		componenttest.NewNopReceiverCreateSettings(),
+		receivertest.NewNopCreateSettings(),
 		cfg,
 		consumertest.NewNop())
 	require.NoError(t, err)
@@ -853,24 +857,23 @@ func TestHTTPMaxRequestBodySize_TooLarge(t *testing.T) {
 func newGRPCReceiver(t *testing.T, name string, endpoint string, tc consumer.Traces, mc consumer.Metrics) component.Component {
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig().(*Config)
-	cfg.SetIDName(name)
 	cfg.GRPC.NetAddr.Endpoint = endpoint
 	cfg.HTTP = nil
-	return newReceiver(t, factory, cfg, tc, mc)
+	return newReceiver(t, factory, cfg, component.NewIDWithName(typeStr, name), tc, mc)
 }
 
 func newHTTPReceiver(t *testing.T, endpoint string, tc consumer.Traces, mc consumer.Metrics) component.Component {
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig().(*Config)
-	cfg.SetIDName(otlpReceiverName)
 	cfg.HTTP.Endpoint = endpoint
 	cfg.GRPC = nil
-	return newReceiver(t, factory, cfg, tc, mc)
+	return newReceiver(t, factory, cfg, otlpReceiverID, tc, mc)
 }
 
-func newReceiver(t *testing.T, factory component.ReceiverFactory, cfg *Config, tc consumer.Traces, mc consumer.Metrics) component.Component {
-	set := componenttest.NewNopReceiverCreateSettings()
+func newReceiver(t *testing.T, factory receiver.Factory, cfg *Config, id component.ID, tc consumer.Traces, mc consumer.Metrics) component.Component {
+	set := receivertest.NewNopCreateSettings()
 	set.TelemetrySettings.MetricsLevel = configtelemetry.LevelNormal
+	set.ID = id
 	var r component.Component
 	var err error
 	if tc != nil {
@@ -909,12 +912,13 @@ func TestShutdown(t *testing.T) {
 	// Create OTLP receiver with gRPC and HTTP protocols.
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig().(*Config)
-	cfg.SetIDName(otlpReceiverName)
 	cfg.GRPC.NetAddr.Endpoint = endpointGrpc
 	cfg.HTTP.Endpoint = endpointHTTP
+	set := receivertest.NewNopCreateSettings()
+	set.ID = otlpReceiverID
 	r, err := NewFactory().CreateTracesReceiver(
 		context.Background(),
-		componenttest.NewNopReceiverCreateSettings(),
+		set,
 		cfg,
 		nextSink)
 	require.NoError(t, err)

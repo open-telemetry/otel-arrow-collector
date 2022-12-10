@@ -20,6 +20,7 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
+	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal"
 	"go.opentelemetry.io/collector/obsreport"
 )
@@ -155,16 +156,16 @@ type baseExporter struct {
 	qrSender *queuedRetrySender
 }
 
-func newBaseExporter(cfg component.ExporterConfig, set component.ExporterCreateSettings, bs *baseSettings, signal component.DataType, reqUnmarshaler internal.RequestUnmarshaler) (*baseExporter, error) {
+func newBaseExporter(set exporter.CreateSettings, bs *baseSettings, signal component.DataType, reqUnmarshaler internal.RequestUnmarshaler) (*baseExporter, error) {
 	be := &baseExporter{}
 
 	var err error
-	be.obsrep, err = newObsExporter(obsreport.ExporterSettings{ExporterID: cfg.ID(), ExporterCreateSettings: set}, globalInstruments)
+	be.obsrep, err = newObsExporter(obsreport.ExporterSettings{ExporterID: set.ID, ExporterCreateSettings: set}, globalInstruments)
 	if err != nil {
 		return nil, err
 	}
 
-	be.qrSender = newQueuedRetrySender(cfg.ID(), signal, bs.QueueSettings, bs.RetrySettings, reqUnmarshaler, &timeoutSender{cfg: bs.TimeoutSettings}, set.Logger)
+	be.qrSender = newQueuedRetrySender(set.ID, signal, bs.QueueSettings, bs.RetrySettings, reqUnmarshaler, &timeoutSender{cfg: bs.TimeoutSettings}, set.Logger)
 	be.sender = be.qrSender
 	be.StartFunc = func(ctx context.Context, host component.Host) error {
 		// First start the wrapped exporter.
