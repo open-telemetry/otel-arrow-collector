@@ -74,9 +74,14 @@ func createTraces(
 	cfg component.Config,
 	nextConsumer consumer.Traces,
 ) (receiver.Traces, error) {
-	r := receivers.GetOrAdd(cfg, func() component.Component {
-		return newOtlpReceiver(cfg.(*Config), set)
+	var err error
+	r := receivers.GetOrAdd(cfg, func() (comp component.Component) {
+		comp, err = newOtlpReceiver(cfg.(*Config), set)
+		return comp
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	if err := r.Unwrap().(*otlpReceiver).registerTraceConsumer(nextConsumer); err != nil {
 		return nil, err
@@ -91,9 +96,14 @@ func createMetrics(
 	cfg component.Config,
 	consumer consumer.Metrics,
 ) (receiver.Metrics, error) {
-	r := receivers.GetOrAdd(cfg, func() component.Component {
-		return newOtlpReceiver(cfg.(*Config), set)
+	var err error
+	r := receivers.GetOrAdd(cfg, func() (comp component.Component) {
+		comp, err = newOtlpReceiver(cfg.(*Config), set)
+		return comp
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	if err := r.Unwrap().(*otlpReceiver).registerMetricsConsumer(consumer); err != nil {
 		return nil, err
@@ -108,9 +118,14 @@ func createLog(
 	cfg component.Config,
 	consumer consumer.Logs,
 ) (receiver.Logs, error) {
-	r := receivers.GetOrAdd(cfg, func() component.Component {
-		return newOtlpReceiver(cfg.(*Config), set)
+	var err error
+	r := receivers.GetOrAdd(cfg, func() (comp component.Component) {
+		comp, err = newOtlpReceiver(cfg.(*Config), set)
+		return comp
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	if err := r.Unwrap().(*otlpReceiver).registerLogsConsumer(consumer); err != nil {
 		return nil, err

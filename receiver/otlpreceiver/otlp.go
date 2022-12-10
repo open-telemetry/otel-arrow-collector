@@ -26,11 +26,13 @@ import (
 	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/stats"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/config/confighttp"
 	"go.opentelemetry.io/collector/consumer"
+	"go.opentelemetry.io/collector/obsreport"
 	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
 	"go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp"
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
@@ -47,6 +49,7 @@ type otlpReceiver struct {
 	serverGRPC *grpc.Server
 	httpMux    *http.ServeMux
 	serverHTTP *http.Server
+	obsNet     *obsreport.NetworkReporter
 
 	traceReceiver   *trace.Receiver
 	metricsReceiver *metrics.Receiver
@@ -60,16 +63,22 @@ type otlpReceiver struct {
 // newOtlpReceiver just creates the OpenTelemetry receiver services. It is the caller's
 // responsibility to invoke the respective Start*Reception methods as well
 // as the various Stop*Reception methods to end it.
-func newOtlpReceiver(cfg *Config, settings receiver.CreateSettings) *otlpReceiver {
+func newOtlpReceiver(cfg *Config, settings receiver.CreateSettings) (*otlpReceiver, error) {
+	obsNet, err := obsreport.NewReceiverNetworkReporter(settings)
+	if err != nil {
+		return nil, err
+	}
+
 	r := &otlpReceiver{
 		cfg:      cfg,
 		settings: settings,
+		obsNet:   obsNet,
 	}
 	if cfg.HTTP != nil {
 		r.httpMux = http.NewServeMux()
 	}
 
-	return r
+	return r, nil
 }
 
 func (r *otlpReceiver) startGRPCServer(cfg *configgrpc.GRPCServerSettings, host component.Host) error {
@@ -111,7 +120,13 @@ func (r *otlpReceiver) startHTTPServer(cfg *confighttp.HTTPServerSettings, host 
 func (r *otlpReceiver) startProtocolServers(host component.Host) error {
 	var err error
 	if r.cfg.GRPC != nil {
-		r.serverGRPC, err = r.cfg.GRPC.ToServer(host, r.settings.TelemetrySettings)
+		var serverOpts []grpc.ServerOption
+
+		if r.obsNet != nil {
+			serverOpts = append(serverOpts, grpc.StatsHandler(r))
+		}
+
+		r.serverGRPC, err = r.cfg.GRPC.ToServer(host, r.settings.TelemetrySettings, serverOpts...)
 		if err != nil {
 			return err
 		}
@@ -302,4 +317,40 @@ func (r *otlpReceiver) Logs() consumer.Logs {
 		return nil
 	}
 	return r.logReceiver.Consumer()
+}
+
+// TagRPC implements grpc/stats.Handler
+func (r *otlpReceiver) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) context.Context {
+	return ctx
+}
+
+// HandleRPC implements grpc/stats.Handler
+func (r *otlpReceiver) HandleRPC(ctx context.Context, rs stats.RPCStats) {
+	switch s := rs.(type) {
+	case *stats.Begin, *stats.OutHeader, *stats.OutTrailer, *stats.InHeader, *stats.InTrailer:
+		// Note we have some info aboute header WireLength,
+		// but intentionally not counting.
+
+	case *stats.InPayload:
+		var ss obsreport.SizesStruct
+		ss.Length = int64(s.Length)
+		ss.WireLength = int64(s.WireLength)
+		r.obsNet.CountReceive(ctx, ss)
+
+	case *stats.OutPayload:
+		var ss obsreport.SizesStruct
+		ss.Length = int64(s.Length)
+		ss.WireLength = int64(s.WireLength)
+		r.obsNet.CountSend(ctx, ss)
+	}
+}
+
+// TagConn implements grpc/stats.Handler
+func (r *otlpReceiver) TagConn(ctx context.Context, _ *stats.ConnTagInfo) context.Context {
+	return ctx
+}
+
+// HandleConn implements grpc/stats.Handler
+func (r *otlpReceiver) HandleConn(_ context.Context, s stats.ConnStats) {
+	// Note: ConnBegin and ConnEnd
 }
