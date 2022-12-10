@@ -34,9 +34,7 @@ type Factories struct {
 	Extensions map[Type]ExtensionFactory
 }
 
-// MakeReceiverFactoryMap takes a list of receiver factories and returns a map
-// with factory type as keys. It returns a non-nil error when more than one factories
-// have the same type.
+// Deprecated: [v0.67.0] use receiver.MakeFactoryMap
 func MakeReceiverFactoryMap(factories ...ReceiverFactory) (map[Type]ReceiverFactory, error) {
 	fMap := map[Type]ReceiverFactory{}
 	for _, f := range factories {
@@ -62,9 +60,7 @@ func MakeProcessorFactoryMap(factories ...ProcessorFactory) (map[Type]ProcessorF
 	return fMap, nil
 }
 
-// MakeExporterFactoryMap takes a list of exporter factories and returns a map
-// with factory type as keys. It returns a non-nil error when more than one factories
-// have the same type.
+// Deprecated: [v0.67.0] use exporter.MakeFactoryMap
 func MakeExporterFactoryMap(factories ...ExporterFactory) (map[Type]ExporterFactory, error) {
 	fMap := map[Type]ExporterFactory{}
 	for _, f := range factories {
@@ -76,9 +72,7 @@ func MakeExporterFactoryMap(factories ...ExporterFactory) (map[Type]ExporterFact
 	return fMap, nil
 }
 
-// MakeExtensionFactoryMap takes a list of extension factories and returns a map
-// with factory type as keys. It returns a non-nil error when more than one factories
-// have the same type.
+// Deprecated: [v0.67.0] use extension.MakeFactoryMap
 func MakeExtensionFactoryMap(factories ...ExtensionFactory) (map[Type]ExtensionFactory, error) {
 	fMap := map[Type]ExtensionFactory{}
 	for _, f := range factories {

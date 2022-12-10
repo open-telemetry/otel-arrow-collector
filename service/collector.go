@@ -34,24 +34,18 @@ import (
 )
 
 // State defines Collector's state.
+// Deprecated: [v0.67.0] use otelcol.State
 type State int
 
 const (
+	// Deprecated: [v0.67.0] use otelcol.StateStarting
 	StateStarting State = iota
+	// Deprecated: [v0.67.0] use otelcol.StateRunning
 	StateRunning
+	// Deprecated: [v0.67.0] use otelcol.StateClosing
 	StateClosing
+	// Deprecated: [v0.67.0] use otelcol.StateClosed
 	StateClosed
-)
-
-const (
-	// Deprecated: [v0.65.0] use StateStarting.
-	Starting = StateStarting
-	// Deprecated: [v0.65.0] use StateRunning.
-	Running = StateRunning
-	// Deprecated: [v0.65.0] use StateClosing.
-	Closing = StateClosing
-	// Deprecated: [v0.65.0] use StateClosed.
-	Closed = StateClosed
 )
 
 func (s State) String() string {
@@ -80,6 +74,7 @@ func (s State) String() string {
 // - Users can call (*Collector).Shutdown anytime to shut down the collector.
 
 // Collector represents a server providing the OpenTelemetry Collector service.
+// Deprecated: [v0.67.0] use otelcol.Collector
 type Collector struct {
 	set CollectorSettings
 
@@ -97,6 +92,7 @@ type Collector struct {
 }
 
 // New creates and returns a new instance of Collector.
+// Deprecated: [v0.67.0] use otelcol.NewCollector
 func New(set CollectorSettings) (*Collector, error) {
 	if set.ConfigProvider == nil {
 		return nil, errors.New("invalid nil config provider")
@@ -107,10 +103,12 @@ func New(set CollectorSettings) (*Collector, error) {
 	}
 
 	return &Collector{
-		set:               set,
-		state:             atomic.NewInt32(int32(StateStarting)),
-		shutdownChan:      make(chan struct{}),
-		signalsChannel:    make(chan os.Signal, 1),
+		set:          set,
+		state:        atomic.NewInt32(int32(StateStarting)),
+		shutdownChan: make(chan struct{}),
+		// Per signal.Notify documentation, a size of the channel equaled with
+		// the number of signals getting notified on is recommended.
+		signalsChannel:    make(chan os.Signal, 3),
 		asyncErrorChannel: make(chan error),
 	}, nil
 }
@@ -194,6 +192,7 @@ func (col *Collector) Run(ctx context.Context) error {
 
 	// Always notify with SIGHUP for configuration reloading.
 	signal.Notify(col.signalsChannel, syscall.SIGHUP)
+	defer signal.Stop(col.signalsChannel)
 
 	// Only notify with SIGTERM and SIGINT if graceful shutdown is enabled.
 	if !col.set.DisableGracefulShutdown {
@@ -208,7 +207,6 @@ LOOP:
 				col.service.telemetrySettings.Logger.Error("Config watch failed", zap.Error(err))
 				break LOOP
 			}
-
 			if err = col.reloadConfiguration(ctx); err != nil {
 				return err
 			}
@@ -217,20 +215,17 @@ LOOP:
 			break LOOP
 		case s := <-col.signalsChannel:
 			col.service.telemetrySettings.Logger.Info("Received signal from OS", zap.String("signal", s.String()))
-			switch s {
-			case syscall.SIGHUP:
-				if err := col.reloadConfiguration(ctx); err != nil {
-					return err
-				}
-			default:
+			if s != syscall.SIGHUP {
 				break LOOP
+			}
+			if err := col.reloadConfiguration(ctx); err != nil {
+				return err
 			}
 		case <-col.shutdownChan:
 			col.service.telemetrySettings.Logger.Info("Received shutdown request")
 			break LOOP
 		case <-ctx.Done():
 			col.service.telemetrySettings.Logger.Info("Context done, terminating process", zap.Error(ctx.Err()))
-
 			// Call shutdown with background context as the passed in context has been canceled
 			return col.shutdown(context.Background())
 		}

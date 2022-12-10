@@ -21,25 +21,26 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/confmap"
+	"go.opentelemetry.io/collector/exporter"
+	"go.opentelemetry.io/collector/exporter/exportertest"
 )
 
 func TestExportersUnmarshal(t *testing.T) {
-	factories, err := componenttest.NopFactories()
+	factories, err := exporter.MakeFactoryMap(exportertest.NewNopFactory())
 	require.NoError(t, err)
 
-	exps := NewExporters(factories.Exporters)
+	exps := NewExporters(factories)
 	conf := confmap.NewFromStringMap(map[string]interface{}{
 		"nop":            nil,
 		"nop/myexporter": nil,
 	})
 	require.NoError(t, exps.Unmarshal(conf))
 
-	cfgWithName := factories.Exporters["nop"].CreateDefaultConfig()
-	cfgWithName.SetIDName("myexporter")
-	assert.Equal(t, map[component.ID]component.ExporterConfig{
-		component.NewID("nop"):                       factories.Exporters["nop"].CreateDefaultConfig(),
+	cfgWithName := factories["nop"].CreateDefaultConfig()
+	cfgWithName.SetIDName("myexporter") //nolint:staticcheck
+	assert.Equal(t, map[component.ID]component.Config{
+		component.NewID("nop"):                       factories["nop"].CreateDefaultConfig(),
 		component.NewIDWithName("nop", "myexporter"): cfgWithName,
 	}, exps.GetExporters())
 }
@@ -100,12 +101,12 @@ func TestExportersUnmarshalError(t *testing.T) {
 		},
 	}
 
-	factories, err := componenttest.NopFactories()
+	factories, err := exporter.MakeFactoryMap(exportertest.NewNopFactory())
 	assert.NoError(t, err)
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
-			exps := NewExporters(factories.Exporters)
+			exps := NewExporters(factories)
 			err = exps.Unmarshal(tt.conf)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.expectedError)

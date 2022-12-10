@@ -21,25 +21,26 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/confmap"
+	"go.opentelemetry.io/collector/receiver"
+	"go.opentelemetry.io/collector/receiver/receivertest"
 )
 
 func TestReceiversUnmarshal(t *testing.T) {
-	factories, err := componenttest.NopFactories()
+	factories, err := receiver.MakeFactoryMap(receivertest.NewNopFactory())
 	require.NoError(t, err)
 
-	recvs := NewReceivers(factories.Receivers)
+	recvs := NewReceivers(factories)
 	conf := confmap.NewFromStringMap(map[string]interface{}{
 		"nop":            nil,
 		"nop/myreceiver": nil,
 	})
 	require.NoError(t, recvs.Unmarshal(conf))
 
-	cfgWithName := factories.Receivers["nop"].CreateDefaultConfig()
-	cfgWithName.SetIDName("myreceiver")
-	assert.Equal(t, map[component.ID]component.ReceiverConfig{
-		component.NewID("nop"):                       factories.Receivers["nop"].CreateDefaultConfig(),
+	cfgWithName := factories["nop"].CreateDefaultConfig()
+	cfgWithName.SetIDName("myreceiver") //nolint:staticcheck
+	assert.Equal(t, map[component.ID]component.Config{
+		component.NewID("nop"):                       factories["nop"].CreateDefaultConfig(),
 		component.NewIDWithName("nop", "myreceiver"): cfgWithName,
 	}, recvs.GetReceivers())
 }
@@ -100,12 +101,12 @@ func TestReceiversUnmarshalError(t *testing.T) {
 		},
 	}
 
-	factories, err := componenttest.NopFactories()
+	factories, err := receiver.MakeFactoryMap(receivertest.NewNopFactory())
 	assert.NoError(t, err)
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
-			recvs := NewReceivers(factories.Receivers)
+			recvs := NewReceivers(factories)
 			err = recvs.Unmarshal(tt.conf)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.expectedError)

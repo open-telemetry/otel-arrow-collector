@@ -39,11 +39,12 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/config/configtls"
 	"go.opentelemetry.io/collector/exporter/otlpexporter/internal/arrow"
+	"go.opentelemetry.io/collector/exporter"
+	"go.opentelemetry.io/collector/exporter/exportertest"
 	"go.opentelemetry.io/collector/internal/testdata"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
@@ -234,7 +235,7 @@ func TestSendTraces(t *testing.T) {
 			"header": "header-value",
 		},
 	}
-	set := componenttest.NewNopExporterCreateSettings()
+	set := exportertest.NewNopCreateSettings()
 	set.BuildInfo.Description = "Collector"
 	set.BuildInfo.Version = "1.2.3test"
 	exp, err := factory.CreateTracesExporter(context.Background(), set, cfg)
@@ -331,7 +332,7 @@ func TestSendTracesWhenEndpointHasHttpScheme(t *testing.T) {
 			if test.useTLS {
 				cfg.GRPCClientSettings.TLSSetting.InsecureSkipVerify = true
 			}
-			set := componenttest.NewNopExporterCreateSettings()
+			set := exportertest.NewNopCreateSettings()
 			exp, err := factory.CreateTracesExporter(context.Background(), set, cfg)
 			require.NoError(t, err)
 			require.NotNil(t, exp)
@@ -381,7 +382,7 @@ func TestSendMetrics(t *testing.T) {
 			"header": "header-value",
 		},
 	}
-	set := componenttest.NewNopExporterCreateSettings()
+	set := exportertest.NewNopCreateSettings()
 	set.BuildInfo.Description = "Collector"
 	set.BuildInfo.Version = "1.2.3test"
 	exp, err := factory.CreateMetricsExporter(context.Background(), set, cfg)
@@ -454,7 +455,7 @@ func TestSendTraceDataServerDownAndUp(t *testing.T) {
 		// Do not rely on external retry logic here, if that is intended set InitialInterval to 100ms.
 		WaitForReady: true,
 	}
-	set := componenttest.NewNopExporterCreateSettings()
+	set := exportertest.NewNopCreateSettings()
 	exp, err := factory.CreateTracesExporter(context.Background(), set, cfg)
 	require.NoError(t, err)
 	require.NotNil(t, exp)
@@ -511,7 +512,7 @@ func TestSendTraceDataServerStartWhileRequest(t *testing.T) {
 			Insecure: true,
 		},
 	}
-	set := componenttest.NewNopExporterCreateSettings()
+	set := exportertest.NewNopCreateSettings()
 	exp, err := factory.CreateTracesExporter(context.Background(), set, cfg)
 	require.NoError(t, err)
 	require.NotNil(t, exp)
@@ -564,7 +565,7 @@ func TestSendTracesOnResourceExhaustion(t *testing.T) {
 			Insecure: true,
 		},
 	}
-	set := componenttest.NewNopExporterCreateSettings()
+	set := exportertest.NewNopCreateSettings()
 	exp, err := factory.CreateTracesExporter(context.Background(), set, cfg)
 	require.NoError(t, err)
 	require.NotNil(t, exp)
@@ -600,7 +601,7 @@ func TestSendTracesOnResourceExhaustion(t *testing.T) {
 	}, 10*time.Second, 5*time.Millisecond, "Should retry if RetryInfo is included into status details by the server.")
 }
 
-func startServerAndMakeRequest(t *testing.T, exp component.TracesExporter, td ptrace.Traces, ln net.Listener) {
+func startServerAndMakeRequest(t *testing.T, exp exporter.Traces, td ptrace.Traces, ln net.Listener) {
 	rcv, _ := otlpTracesReceiverOnGRPCServer(ln, false)
 	rcv.start()
 	defer rcv.srv.GracefulStop()
@@ -643,7 +644,7 @@ func TestSendLogData(t *testing.T) {
 			Insecure: true,
 		},
 	}
-	set := componenttest.NewNopExporterCreateSettings()
+	set := exportertest.NewNopCreateSettings()
 	set.BuildInfo.Description = "Collector"
 	set.BuildInfo.Version = "1.2.3test"
 	exp, err := factory.CreateLogsExporter(context.Background(), set, cfg)

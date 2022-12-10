@@ -4,13 +4,16 @@ package main
 
 import (
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/exporter"
 	loggingexporter "go.opentelemetry.io/collector/exporter/loggingexporter"
 	otlpexporter "go.opentelemetry.io/collector/exporter/otlpexporter"
 	otlphttpexporter "go.opentelemetry.io/collector/exporter/otlphttpexporter"
+	"go.opentelemetry.io/collector/extension"
 	ballastextension "go.opentelemetry.io/collector/extension/ballastextension"
 	zpagesextension "go.opentelemetry.io/collector/extension/zpagesextension"
 	batchprocessor "go.opentelemetry.io/collector/processor/batchprocessor"
 	memorylimiterprocessor "go.opentelemetry.io/collector/processor/memorylimiterprocessor"
+	"go.opentelemetry.io/collector/receiver"
 	otlpreceiver "go.opentelemetry.io/collector/receiver/otlpreceiver"
 )
 
@@ -18,7 +21,7 @@ func components() (component.Factories, error) {
 	var err error
 	factories := component.Factories{}
 
-	factories.Extensions, err = component.MakeExtensionFactoryMap(
+	factories.Extensions, err = extension.MakeFactoryMap(
 		ballastextension.NewFactory(),
 		zpagesextension.NewFactory(),
 	)
@@ -26,14 +29,14 @@ func components() (component.Factories, error) {
 		return component.Factories{}, err
 	}
 
-	factories.Receivers, err = component.MakeReceiverFactoryMap(
+	factories.Receivers, err = receiver.MakeFactoryMap(
 		otlpreceiver.NewFactory(),
 	)
 	if err != nil {
 		return component.Factories{}, err
 	}
 
-	factories.Exporters, err = component.MakeExporterFactoryMap(
+	factories.Exporters, err = exporter.MakeFactoryMap(
 		loggingexporter.NewFactory(),
 		otlpexporter.NewFactory(),
 		otlphttpexporter.NewFactory(),

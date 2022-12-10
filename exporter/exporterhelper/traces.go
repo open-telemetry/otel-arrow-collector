@@ -21,6 +21,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/consumererror"
+	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper/internal"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 )
@@ -78,14 +79,14 @@ type traceExporter struct {
 	consumer.Traces
 }
 
-// NewTracesExporter creates a component.TracesExporter that records observability metrics and wraps every request with a Span.
+// NewTracesExporter creates a exporter.Traces that records observability metrics and wraps every request with a Span.
 func NewTracesExporter(
 	_ context.Context,
-	set component.ExporterCreateSettings,
-	cfg component.ExporterConfig,
+	set exporter.CreateSettings,
+	cfg component.Config,
 	pusher consumer.ConsumeTracesFunc,
 	options ...Option,
-) (component.TracesExporter, error) {
+) (exporter.Traces, error) {
 	if cfg == nil {
 		return nil, errNilConfig
 	}
@@ -99,7 +100,7 @@ func NewTracesExporter(
 	}
 
 	bs := fromOptions(options...)
-	be, err := newBaseExporter(cfg, set, bs, component.DataTypeTraces, newTraceRequestUnmarshalerFunc(pusher))
+	be, err := newBaseExporter(set, bs, component.DataTypeTraces, newTraceRequestUnmarshalerFunc(pusher))
 	if err != nil {
 		return nil, err
 	}

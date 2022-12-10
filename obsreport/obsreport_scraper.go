@@ -33,6 +33,7 @@ import (
 	"go.opentelemetry.io/collector/featuregate"
 	"go.opentelemetry.io/collector/internal/obsreportconfig"
 	"go.opentelemetry.io/collector/internal/obsreportconfig/obsmetrics"
+	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/receiver/scrapererror"
 )
 
@@ -61,22 +62,12 @@ type Scraper struct {
 type ScraperSettings struct {
 	ReceiverID             component.ID
 	Scraper                component.ID
-	ReceiverCreateSettings component.ReceiverCreateSettings
+	ReceiverCreateSettings receiver.CreateSettings
 }
 
 // NewScraper creates a new Scraper.
 func NewScraper(cfg ScraperSettings) (*Scraper, error) {
 	return newScraper(cfg, featuregate.GetRegistry())
-}
-
-// Deprecated: [v0.65.0] use NewScraper.
-func MustNewScraper(cfg ScraperSettings) *Scraper {
-	scr, err := newScraper(cfg, featuregate.GetRegistry())
-	if err != nil {
-		panic(err)
-	}
-
-	return scr
 }
 
 func newScraper(cfg ScraperSettings, registry *featuregate.Registry) (*Scraper, error) {
