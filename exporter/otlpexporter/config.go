@@ -36,6 +36,14 @@ type Config struct {
 	Arrow *arrow.Settings `mapstructure:"arrow"`
 }
 
+// @@@
+func (cfg *Config) EnableArrow(n int) {
+	cfg.Arrow = &arrow.Settings{
+		Enabled: true,
+		NumStreams: n,
+	}
+}
+
 var _ component.Config = (*Config)(nil)
 
 // Validate checks if the exporter configuration is valid
