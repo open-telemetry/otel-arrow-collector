@@ -16,6 +16,7 @@ package arrow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -24,6 +25,7 @@ import (
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
 	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 	arrowRecordMock "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record/mock"
+	otelAssert "github.com/f5/otel-arrow-adapter/pkg/otel/assert"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -34,6 +36,25 @@ import (
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 )
+
+type compareJSONTraces struct{ ptrace.Traces }
+type compareJSONMetrics struct{ pmetric.Metrics }
+type compareJSONLogs struct{ plog.Logs }
+
+func (c compareJSONTraces) MarshalJSON() ([]byte, error) {
+	var m ptrace.JSONMarshaler
+	return m.MarshalTraces(c.Traces)
+}
+
+func (c compareJSONMetrics) MarshalJSON() ([]byte, error) {
+	var m pmetric.JSONMarshaler
+	return m.MarshalMetrics(c.Metrics)
+}
+
+func (c compareJSONLogs) MarshalJSON() ([]byte, error) {
+	var m plog.JSONMarshaler
+	return m.MarshalLogs(c.Logs)
+}
 
 type exporterTestCase struct {
 	*commonTestCase
@@ -144,15 +165,30 @@ func TestArrowExporterSuccess(t *testing.T) {
 		case ptrace.Traces:
 			traces, err := testCon.TracesFrom(outputData)
 			require.NoError(t, err)
-			require.Equal(t, []ptrace.Traces{testData}, traces)
+			require.Equal(t, 1, len(traces))
+			otelAssert.Equiv(t, []json.Marshaler{
+				compareJSONTraces{testData},
+			}, []json.Marshaler{
+				compareJSONTraces{traces[0]},
+			})
 		case plog.Logs:
 			logs, err := testCon.LogsFrom(outputData)
 			require.NoError(t, err)
-			require.Equal(t, []plog.Logs{testData}, logs)
+			require.Equal(t, 1, len(logs))
+			otelAssert.Equiv(t, []json.Marshaler{
+				compareJSONLogs{testData},
+			}, []json.Marshaler{
+				compareJSONLogs{logs[0]},
+			})
 		case pmetric.Metrics:
 			metrics, err := testCon.MetricsFrom(outputData)
 			require.NoError(t, err)
-			require.Equal(t, []pmetric.Metrics{testData}, metrics)
+			require.Equal(t, 1, len(metrics))
+			otelAssert.Equiv(t, []json.Marshaler{
+				compareJSONMetrics{testData},
+			}, []json.Marshaler{
+				compareJSONMetrics{metrics[0]},
+			})
 		}
 
 		require.NoError(t, tc.exporter.Shutdown(ctx))

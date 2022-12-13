@@ -24,13 +24,13 @@ require (
 	github.com/andybalholm/brotli v1.0.4 // indirect
 	github.com/apache/arrow/go/arrow v0.0.0-20211112161151-bc219186db40 // indirect
 	github.com/apache/arrow/go/v10 v10.0.0 // indirect
-	github.com/apache/arrow/go/v11 v11.0.0-20221116153901-e38141421d43 // indirect
+	github.com/apache/arrow/go/v11 v11.0.0-20221213164841-56cf063b5251 // indirect
 	github.com/apache/thrift v0.16.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.0 // indirect
 	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/f5/otel-arrow-adapter v0.0.0-20221123183754-cc5f830bf358 // indirect
+	github.com/f5/otel-arrow-adapter v0.0.0-20221209234406-0e3c0d4657bf // indirect
 	github.com/felixge/httpsnoop v1.0.3 // indirect
 	github.com/go-kit/log v0.2.1 // indirect
 	github.com/go-logfmt/logfmt v0.5.1 // indirect
@@ -80,7 +80,7 @@ require (
 	go.opentelemetry.io/collector/confmap v0.67.0 // indirect
 	go.opentelemetry.io/collector/consumer v0.67.0 // indirect
 	go.opentelemetry.io/collector/featuregate v0.67.0 // indirect
-	go.opentelemetry.io/collector/pdata v1.0.0-rc1 // indirect
+	go.opentelemetry.io/collector/pdata v1.0.0-rc1.0.20221209003232-33cdc7907c2d // indirect
 	go.opentelemetry.io/collector/semconv v0.67.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.36.4 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.36.4 // indirect

@@ -1,0 +1,3 @@
+			d1, _ := (&pmetric.JSONMarshaler{}).MarshalMetrics(testData)
+			d2, _ := (&pmetric.JSONMarshaler{}).MarshalMetrics(metrics[0])
+			// require.Equal(t, string(d1), string(d2))
