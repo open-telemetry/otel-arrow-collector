@@ -4,14 +4,14 @@ go 1.18
 
 require (
 	github.com/apache/arrow/go/v10 v10.0.0
-	github.com/f5/otel-arrow-adapter v0.0.0-20221117192416-4be8d64bf483
+	github.com/f5/otel-arrow-adapter v0.0.0-20221209234406-0e3c0d4657bf
 	github.com/golang/mock v1.6.0
 	github.com/stretchr/testify v1.8.1
 	go.opentelemetry.io/collector v0.67.0
 	go.opentelemetry.io/collector/component v0.67.0
 	go.opentelemetry.io/collector/confmap v0.67.0
 	go.opentelemetry.io/collector/consumer v0.67.0
-	go.opentelemetry.io/collector/pdata v1.0.0-rc1
+	go.opentelemetry.io/collector/pdata v1.0.0-rc1.0.20221209003232-33cdc7907c2d
 	go.uber.org/atomic v1.10.0
 	go.uber.org/multierr v1.8.0
 	go.uber.org/zap v1.24.0
@@ -23,7 +23,7 @@ require (
 require (
 	github.com/andybalholm/brotli v1.0.4 // indirect
 	github.com/apache/arrow/go/arrow v0.0.0-20211112161151-bc219186db40 // indirect
-	github.com/apache/arrow/go/v11 v11.0.0-20221116153901-e38141421d43 // indirect
+	github.com/apache/arrow/go/v11 v11.0.0-20221213164841-56cf063b5251 // indirect
 	github.com/apache/thrift v0.16.0 // indirect
 	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.0 // indirect
