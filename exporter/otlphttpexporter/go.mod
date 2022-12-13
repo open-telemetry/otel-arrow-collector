@@ -8,7 +8,7 @@ require (
 	go.opentelemetry.io/collector/component v0.67.0
 	go.opentelemetry.io/collector/confmap v0.67.0
 	go.opentelemetry.io/collector/consumer v0.67.0
-	go.opentelemetry.io/collector/pdata v1.0.0-rc1
+	go.opentelemetry.io/collector/pdata v1.0.0-rc1.0.20221209003232-33cdc7907c2d
 	go.opentelemetry.io/collector/receiver/otlpreceiver v0.67.0
 	go.uber.org/zap v1.24.0
 	google.golang.org/genproto v0.0.0-20221027153422-115e99e71e1c
@@ -19,11 +19,11 @@ require (
 require (
 	github.com/andybalholm/brotli v1.0.4 // indirect
 	github.com/apache/arrow/go/arrow v0.0.0-20211112161151-bc219186db40 // indirect
-	github.com/apache/arrow/go/v11 v11.0.0-20221116153901-e38141421d43 // indirect
+	github.com/apache/arrow/go/v11 v11.0.0-20221213164841-56cf063b5251 // indirect
 	github.com/apache/thrift v0.16.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/f5/otel-arrow-adapter v0.0.0-20221123183754-cc5f830bf358 // indirect
+	github.com/f5/otel-arrow-adapter v0.0.0-20221209234406-0e3c0d4657bf // indirect
 	github.com/felixge/httpsnoop v1.0.3 // indirect
 	github.com/go-logr/logr v1.2.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

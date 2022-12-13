@@ -16,6 +16,7 @@ package arrow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -30,6 +31,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
 
+	otelAssert "github.com/f5/otel-arrow-adapter/pkg/otel/assert"
+
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/consumer"
@@ -40,9 +43,24 @@ import (
 	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/arrow/mock"
 )
 
-// Note on protocol buffer comparison:
-// EqualValues works for the underlying gogo protos (plog, pmetric, ptrace).
-// cmp.Diff with protocmp.Transform option works for current google protobufs.
+type compareJSONTraces struct{ ptrace.Traces }
+type compareJSONMetrics struct{ pmetric.Metrics }
+type compareJSONLogs struct{ plog.Logs }
+
+func (c compareJSONTraces) MarshalJSON() ([]byte, error) {
+	var m ptrace.JSONMarshaler
+	return m.MarshalTraces(c.Traces)
+}
+
+func (c compareJSONMetrics) MarshalJSON() ([]byte, error) {
+	var m pmetric.JSONMarshaler
+	return m.MarshalMetrics(c.Metrics)
+}
+
+func (c compareJSONLogs) MarshalJSON() ([]byte, error) {
+	var m plog.JSONMarshaler
+	return m.MarshalLogs(c.Logs)
+}
 
 type commonTestCase struct {
 	ctrl      *gomock.Controller
@@ -338,7 +356,7 @@ func TestReceiverLogs(t *testing.T) {
 	ctc.start(ctc.newRealConsumer)
 	ctc.putBatch(batch, nil)
 
-	assert.EqualValues(t, ld, <-ctc.consume)
+	assert.EqualValues(t, []json.Marshaler{compareJSONLogs{ld}}, []json.Marshaler{compareJSONLogs{(<-ctc.consume).(plog.Logs)}})
 
 	err = ctc.cancelAndWait()
 	require.Error(t, err)
@@ -358,7 +376,11 @@ func TestReceiverMetrics(t *testing.T) {
 	ctc.start(ctc.newRealConsumer)
 	ctc.putBatch(batch, nil)
 
-	assert.EqualValues(t, md, <-ctc.consume)
+	otelAssert.Equiv(t, []json.Marshaler{
+		compareJSONMetrics{md},
+	}, []json.Marshaler{
+		compareJSONMetrics{(<-ctc.consume).(pmetric.Metrics)},
+	})
 
 	err = ctc.cancelAndWait()
 	require.Error(t, err)
@@ -428,7 +450,27 @@ func TestReceiverConsumeError(t *testing.T) {
 		ctc.start(ctc.newRealConsumer)
 
 		ctc.putBatch(batch, nil)
-		require.Equal(t, item, <-ctc.consume)
+
+		switch input := item.(type) {
+		case ptrace.Traces:
+			otelAssert.Equiv(t, []json.Marshaler{
+				compareJSONTraces{input},
+			}, []json.Marshaler{
+				compareJSONTraces{(<-ctc.consume).(ptrace.Traces)},
+			})
+		case plog.Logs:
+			otelAssert.Equiv(t, []json.Marshaler{
+				compareJSONLogs{input},
+			}, []json.Marshaler{
+				compareJSONLogs{(<-ctc.consume).(plog.Logs)},
+			})
+		case pmetric.Metrics:
+			otelAssert.Equiv(t, []json.Marshaler{
+				compareJSONMetrics{input},
+			}, []json.Marshaler{
+				compareJSONMetrics{(<-ctc.consume).(pmetric.Metrics)},
+			})
+		}
 
 		err = ctc.cancelAndWait()
 		require.Error(t, err)

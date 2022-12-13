@@ -1080,7 +1080,8 @@ func TestGRPCArrowReceiver(t *testing.T) {
 	cfg.GRPC.NetAddr.Endpoint = addr
 	cfg.HTTP = nil
 	cfg.Arrow.Enabled = true
-	ocr := newReceiver(t, factory, cfg, sink, nil)
+	id := component.NewID("arrow")
+	ocr := newReceiver(t, factory, cfg, id, sink, nil)
 
 	require.NotNil(t, ocr)
 	require.NoError(t, ocr.Start(context.Background(), componenttest.NewNopHost()))

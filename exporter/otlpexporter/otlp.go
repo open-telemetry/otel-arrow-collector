@@ -81,13 +81,13 @@ func newExporter(cfg component.Config, set exporter.CreateSettings) (*baseExport
 		userAgent += fmt.Sprintf(" ApacheArrow/%s (NumStreams/%d)", arrowPkg.PkgVersion, oCfg.Arrow.NumStreams)
 	}
 
-	return &baseExporter{config: oCfg, settings: set.TelemetrySettings, userAgent: userAgent}, nil
+	return &baseExporter{config: oCfg, settings: set, userAgent: userAgent}, nil
 }
 
 // start actually creates the gRPC connection. The client construction is deferred till this point as this
 // is the only place we get hold of Extensions which are required to construct auth round tripper.
 func (e *baseExporter) start(ctx context.Context, host component.Host) (err error) {
-	if e.clientConn, err = e.config.GRPCClientSettings.ToClientConn(ctx, host, e.settings, grpc.WithUserAgent(e.userAgent)); err != nil {
+	if e.clientConn, err = e.config.GRPCClientSettings.ToClientConn(ctx, host, e.settings.TelemetrySettings, grpc.WithUserAgent(e.userAgent)); err != nil {
 		return err
 	}
 	e.traceExporter = ptraceotlp.NewGRPCClient(e.clientConn)
@@ -118,8 +118,9 @@ func (e *baseExporter) shutdown(ctx context.Context) error {
 	if e.arrow != nil {
 		err = multierr.Append(err, e.arrow.Shutdown(ctx))
 	}
-	err = multierr.Append(err, e.clientConn.Close())
-
+	if e.clientConn != nil {
+		err = multierr.Append(err, e.clientConn.Close())
+	}
 	return err
 }
 
@@ -131,13 +132,6 @@ func (e *baseExporter) arrowSendAndWait(ctx context.Context, data interface{}) (
 		return false, nil
 	}
 	return e.arrow.SendAndWait(ctx, data)
-}
-
-func (e *baseExporter) shutdown(context.Context) error {
-	if e.clientConn != nil {
-		return e.clientConn.Close()
-	}
-	return nil
 }
 
 func (e *baseExporter) pushTraces(ctx context.Context, td ptrace.Traces) error {
