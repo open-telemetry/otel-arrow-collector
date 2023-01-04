@@ -738,7 +738,7 @@ func testSendArrowTraces(t *testing.T, clientWaitForReady, streamServiceAvailabl
 		NumStreams: 1,
 	}
 
-	set := componenttest.NewNopExporterCreateSettings()
+	set := exportertest.NewNopCreateSettings()
 	set.TelemetrySettings.Logger = zaptest.NewLogger(t)
 	exp, err := factory.CreateTracesExporter(context.Background(), set, cfg)
 	require.NoError(t, err)
@@ -854,7 +854,7 @@ func TestSendArrowFailedTraces(t *testing.T) {
 	}
 	cfg.QueueSettings.Enabled = false
 
-	set := componenttest.NewNopExporterCreateSettings()
+	set := exportertest.NewNopCreateSettings()
 	set.TelemetrySettings.Logger = zaptest.NewLogger(t)
 	exp, err := factory.CreateTracesExporter(context.Background(), set, cfg)
 	require.NoError(t, err)

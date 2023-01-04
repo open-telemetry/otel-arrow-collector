@@ -7,13 +7,13 @@ require (
 	github.com/f5/otel-arrow-adapter v0.0.0-20221209234406-0e3c0d4657bf
 	github.com/golang/mock v1.6.0
 	github.com/stretchr/testify v1.8.1
-	go.opentelemetry.io/collector v0.67.0
-	go.opentelemetry.io/collector/component v0.67.0
-	go.opentelemetry.io/collector/confmap v0.67.0
-	go.opentelemetry.io/collector/consumer v0.67.0
-	go.opentelemetry.io/collector/pdata v1.0.0-rc1.0.20221209003232-33cdc7907c2d
+	go.opentelemetry.io/collector v0.68.0
+	go.opentelemetry.io/collector/component v0.68.0
+	go.opentelemetry.io/collector/confmap v0.68.0
+	go.opentelemetry.io/collector/consumer v0.68.0
+	go.opentelemetry.io/collector/pdata v1.0.0-rc2
 	go.uber.org/atomic v1.10.0
-	go.uber.org/multierr v1.8.0
+	go.uber.org/multierr v1.9.0
 	go.uber.org/zap v1.24.0
 	google.golang.org/genproto v0.0.0-20221018160656-63c7b68cfc55
 	google.golang.org/grpc v1.51.0
@@ -37,7 +37,7 @@ require (
 	github.com/google/flatbuffers v2.0.8+incompatible // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/asmfmt v1.3.2 // indirect
-	github.com/klauspost/compress v1.15.12 // indirect
+	github.com/klauspost/compress v1.15.13 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
 	github.com/knadh/koanf v1.4.4 // indirect
 	github.com/minio/asm2plan9s v0.0.0-20200509001527-cdd76441f9d8 // indirect
@@ -52,11 +52,11 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.opencensus.io v0.24.0 // indirect
-	go.opentelemetry.io/collector/featuregate v0.67.0 // indirect
-	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.36.4 // indirect
-	go.opentelemetry.io/otel v1.11.1 // indirect
-	go.opentelemetry.io/otel/metric v0.33.0 // indirect
-	go.opentelemetry.io/otel/trace v1.11.1 // indirect
+	go.opentelemetry.io/collector/featuregate v0.68.0 // indirect
+	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.37.0 // indirect
+	go.opentelemetry.io/otel v1.11.2 // indirect
+	go.opentelemetry.io/otel/metric v0.34.0 // indirect
+	go.opentelemetry.io/otel/trace v1.11.2 // indirect
 	golang.org/x/mod v0.6.0 // indirect
 	golang.org/x/net v0.1.0 // indirect
 	golang.org/x/sys v0.3.0 // indirect
@@ -79,7 +79,5 @@ replace go.opentelemetry.io/collector/pdata => ../../pdata
 replace go.opentelemetry.io/collector/semconv => ../../semconv
 
 replace go.opentelemetry.io/collector/extension/zpagesextension => ../../extension/zpagesextension
-
-replace go.opentelemetry.io/collector/processor/batchprocessor => ../../processor/batchprocessor
 
 replace go.opentelemetry.io/collector/consumer => ../../consumer
