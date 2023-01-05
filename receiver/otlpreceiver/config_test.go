@@ -23,7 +23,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.opentelemetry.io/collector/component"
-	"go.opentelemetry.io/collector/config"
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/config/confighttp"
 	"go.opentelemetry.io/collector/config/confignet"
@@ -97,7 +96,6 @@ func TestUnmarshalConfig(t *testing.T) {
 	assert.NoError(t, component.UnmarshalConfig(cm, cfg))
 	assert.Equal(t,
 		&Config{
-			ReceiverSettings: config.NewReceiverSettings(component.NewID(typeStr)),
 			Protocols: Protocols{
 				GRPC: &configgrpc.GRPCServerSettings{
 					NetAddr: confignet.NetAddr{
@@ -157,7 +155,6 @@ func TestUnmarshalConfigUnix(t *testing.T) {
 	assert.NoError(t, component.UnmarshalConfig(cm, cfg))
 	assert.Equal(t,
 		&Config{
-			ReceiverSettings: config.NewReceiverSettings(component.NewID(typeStr)),
 			Protocols: Protocols{
 				GRPC: &configgrpc.GRPCServerSettings{
 					NetAddr: confignet.NetAddr{
@@ -207,7 +204,7 @@ func TestUnmarshalConfigArrowWithoutGRPC(t *testing.T) {
 	require.NoError(t, err)
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig()
-	assert.NoError(t, component.UnmarshalReceiverConfig(cm, cfg))
+	assert.NoError(t, component.UnmarshalConfig(cm, cfg))
 	assert.EqualError(t, component.ValidateConfig(cfg), "must specify at gRPC protocol when using the OTLP+Arrow receiver")
 }
 
