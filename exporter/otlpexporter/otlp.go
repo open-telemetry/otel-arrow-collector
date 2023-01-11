@@ -21,7 +21,7 @@ import (
 	"runtime"
 	"time"
 
-	arrowPkg "github.com/apache/arrow/go/v10/arrow"
+	arrowPkg "github.com/apache/arrow/go/v11/arrow"
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
 	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 	"go.uber.org/multierr"
