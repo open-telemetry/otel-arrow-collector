@@ -110,14 +110,16 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStre
 		if err != nil {
 			return err
 		}
-		// Reset, reparse the headers.
+
+		// Check for optional headers and set the incoming context.
 		thisCtx := streamCtx
 
-		// Check for optional headers.
 		if hdrsBytes := req.GetHeaders(); len(hdrsBytes) != 0 {
 			// Write calls the emitFunc, entering directly into `hdrs`.
 			hp.Write(hdrsBytes)
+
 			thisCtx = metadata.NewIncomingContext(thisCtx, hdrs)
+
 			// Reset `hdrs`.
 			hdrs = metadata.MD{}
 		}

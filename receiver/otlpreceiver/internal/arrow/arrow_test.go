@@ -15,6 +15,7 @@
 package arrow
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -30,6 +31,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
+	"golang.org/x/net/http2/hpack"
+	"google.golang.org/grpc/metadata"
 
 	otelAssert "github.com/f5/otel-arrow-adapter/pkg/otel/assert"
 
@@ -62,6 +65,11 @@ func (c compareJSONLogs) MarshalJSON() ([]byte, error) {
 	return m.MarshalLogs(c.Logs)
 }
 
+type consumeResult struct {
+	Ctx  context.Context
+	Data interface{}
+}
+
 type commonTestCase struct {
 	ctrl      *gomock.Controller
 	cancel    context.CancelFunc
@@ -69,7 +77,7 @@ type commonTestCase struct {
 	consumers mockConsumers
 	stream    *arrowCollectorMock.MockArrowStreamService_ArrowStreamServer
 	receive   chan recvResult
-	consume   chan interface{}
+	consume   chan consumeResult
 	streamErr chan error
 
 	testProducer *arrowRecord.Producer
@@ -139,7 +147,10 @@ func (ctc *commonTestCase) doAndReturnGetBatch(ctx context.Context) func() (*arr
 func (ctc *commonTestCase) doAndReturnConsumeTraces(tc testChannel) func(ctx context.Context, traces ptrace.Traces) error {
 	return func(ctx context.Context, traces ptrace.Traces) error {
 		select {
-		case ctc.consume <- traces:
+		case ctc.consume <- consumeResult{
+			Ctx:  ctx,
+			Data: traces,
+		}:
 			return tc.onConsume()
 		case <-ctx.Done():
 			return ctx.Err()
@@ -150,7 +161,10 @@ func (ctc *commonTestCase) doAndReturnConsumeTraces(tc testChannel) func(ctx con
 func (ctc *commonTestCase) doAndReturnConsumeMetrics(tc testChannel) func(ctx context.Context, metrics pmetric.Metrics) error {
 	return func(ctx context.Context, metrics pmetric.Metrics) error {
 		select {
-		case ctc.consume <- metrics:
+		case ctc.consume <- consumeResult{
+			Ctx:  ctx,
+			Data: metrics,
+		}:
 			return tc.onConsume()
 		case <-ctx.Done():
 			return ctx.Err()
@@ -161,7 +175,10 @@ func (ctc *commonTestCase) doAndReturnConsumeMetrics(tc testChannel) func(ctx co
 func (ctc *commonTestCase) doAndReturnConsumeLogs(tc testChannel) func(ctx context.Context, logs plog.Logs) error {
 	return func(ctx context.Context, logs plog.Logs) error {
 		select {
-		case ctc.consume <- logs:
+		case ctc.consume <- consumeResult{
+			Ctx:  ctx,
+			Data: logs,
+		}:
 			return tc.onConsume()
 		case <-ctx.Done():
 			return ctx.Err()
@@ -219,7 +236,7 @@ func newCommonTestCase(t *testing.T, tc testChannel) *commonTestCase {
 		consumers:    newMockConsumers(ctrl),
 		stream:       stream,
 		receive:      make(chan recvResult),
-		consume:      make(chan interface{}),
+		consume:      make(chan consumeResult),
 		streamErr:    make(chan error),
 		testProducer: arrowRecord.NewProducer(),
 		ctxCall:      stream.EXPECT().Context().Times(0),
@@ -336,7 +353,7 @@ func TestReceiverTraces(t *testing.T) {
 	ctc.start(ctc.newRealConsumer)
 	ctc.putBatch(batch, nil)
 
-	assert.EqualValues(t, td, <-ctc.consume)
+	assert.EqualValues(t, td, (<-ctc.consume).Data)
 
 	err = ctc.cancelAndWait()
 	require.Error(t, err)
@@ -356,7 +373,7 @@ func TestReceiverLogs(t *testing.T) {
 	ctc.start(ctc.newRealConsumer)
 	ctc.putBatch(batch, nil)
 
-	assert.EqualValues(t, []json.Marshaler{compareJSONLogs{ld}}, []json.Marshaler{compareJSONLogs{(<-ctc.consume).(plog.Logs)}})
+	assert.EqualValues(t, []json.Marshaler{compareJSONLogs{ld}}, []json.Marshaler{compareJSONLogs{(<-ctc.consume).Data.(plog.Logs)}})
 
 	err = ctc.cancelAndWait()
 	require.Error(t, err)
@@ -379,7 +396,7 @@ func TestReceiverMetrics(t *testing.T) {
 	otelAssert.Equiv(t, []json.Marshaler{
 		compareJSONMetrics{md},
 	}, []json.Marshaler{
-		compareJSONMetrics{(<-ctc.consume).(pmetric.Metrics)},
+		compareJSONMetrics{(<-ctc.consume).Data.(pmetric.Metrics)},
 	})
 
 	err = ctc.cancelAndWait()
@@ -413,7 +430,7 @@ func TestReceiverSendError(t *testing.T) {
 	ctc.start(ctc.newRealConsumer)
 	ctc.putBatch(batch, nil)
 
-	assert.EqualValues(t, ld, <-ctc.consume)
+	assert.EqualValues(t, ld, (<-ctc.consume).Data)
 
 	err = ctc.wait()
 	require.Error(t, err)
@@ -456,19 +473,19 @@ func TestReceiverConsumeError(t *testing.T) {
 			otelAssert.Equiv(t, []json.Marshaler{
 				compareJSONTraces{input},
 			}, []json.Marshaler{
-				compareJSONTraces{(<-ctc.consume).(ptrace.Traces)},
+				compareJSONTraces{(<-ctc.consume).Data.(ptrace.Traces)},
 			})
 		case plog.Logs:
 			otelAssert.Equiv(t, []json.Marshaler{
 				compareJSONLogs{input},
 			}, []json.Marshaler{
-				compareJSONLogs{(<-ctc.consume).(plog.Logs)},
+				compareJSONLogs{(<-ctc.consume).Data.(plog.Logs)},
 			})
 		case pmetric.Metrics:
 			otelAssert.Equiv(t, []json.Marshaler{
 				compareJSONMetrics{input},
 			}, []json.Marshaler{
-				compareJSONMetrics{(<-ctc.consume).(pmetric.Metrics)},
+				compareJSONMetrics{(<-ctc.consume).Data.(pmetric.Metrics)},
 			})
 		}
 
@@ -542,7 +559,68 @@ func TestReceiverEOF(t *testing.T) {
 	}()
 
 	for i := 0; i < times; i++ {
-		actualData = append(actualData, (<-ctc.consume).(ptrace.Traces))
+		actualData = append(actualData, (<-ctc.consume).Data.(ptrace.Traces))
+	}
+
+	assert.EqualValues(t, expectData, actualData)
+
+	err := ctc.wait()
+	require.Error(t, err)
+	require.True(t, errors.Is(err, io.EOF))
+}
+
+func TestReceiverHeaders(t *testing.T) {
+	tc := healthyTestChannel{}
+	ctc := newCommonTestCase(t, tc)
+
+	const times = 10
+
+	var actualData []metadata.MD
+	expectData := []metadata.MD{
+		{"k1": []string{"v1"}},
+		nil,
+		{"k2": []string{"v2"}, "k3": []string{"v3"}},
+		nil,
+		{"k1": []string{"v5"}},
+		{"k1": []string{"v1"}, "k3": []string{"v2", "v3", "v4"}},
+		nil,
+	}
+
+	ctc.stream.EXPECT().Send(gomock.Any()).Times(len(expectData)).Return(nil)
+
+	ctc.start(ctc.newRealConsumer)
+
+	go func() {
+		var hpb bytes.Buffer
+		hpe := hpack.NewEncoder(&hpb)
+
+		for _, md := range expectData {
+			td := testdata.GenerateTraces(2)
+			batch, err := ctc.testProducer.BatchArrowRecordsFromTraces(td)
+			require.NoError(t, err)
+
+			if len(md) != 0 {
+				hpb.Reset()
+				for key, vals := range md {
+					for _, val := range vals {
+						hpe.WriteField(hpack.HeaderField{
+							Name:  key,
+							Value: val,
+						})
+					}
+				}
+
+				batch.Headers = make([]byte, hpb.Len())
+				copy(batch.Headers, hpb.Bytes())
+			}
+			ctc.putBatch(batch, nil)
+		}
+		close(ctc.receive)
+	}()
+
+	for _ = range expectData {
+		md, _ := metadata.FromIncomingContext((<-ctc.consume).Ctx)
+		actualData = append(actualData, md)
 	}
 
 	assert.EqualValues(t, expectData, actualData)
