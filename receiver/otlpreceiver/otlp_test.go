@@ -32,10 +32,12 @@ import (
 	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/net/http2/hpack"
 	spb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
@@ -1108,9 +1110,22 @@ func (esc *errOrSinkConsumer) Reset() {
 	}
 }
 
+type tracesSinkWithMetadata struct {
+	consumertest.TracesSink
+	MDs []metadata.MD
+}
+
+func (ts *tracesSinkWithMetadata) ConsumeTraces(ctx context.Context, td ptrace.Traces) error {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if ok {
+		ts.MDs = append(ts.MDs, md)
+	}
+	return ts.TracesSink.ConsumeTraces(ctx, td)
+}
+
 func TestGRPCArrowReceiver(t *testing.T) {
 	addr := testutil.GetAvailableLocalAddress(t)
-	sink := new(consumertest.TracesSink)
+	sink := new(tracesSinkWithMetadata)
 
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig().(*Config)
@@ -1134,14 +1149,36 @@ func TestGRPCArrowReceiver(t *testing.T) {
 	require.NoError(t, err)
 	producer := arrowRecord.NewProducer()
 
+	var headerBuf bytes.Buffer
+	hpd := hpack.NewEncoder(&headerBuf)
+
 	var expectTraces []ptrace.Traces
-	// Repeatedly send traces via arrow
+	var expectMDs []metadata.MD
+
+	// Repeatedly send traces via arrow. Set the expected traces
+	// metadata to receive.
 	for i := 0; i < 10; i++ {
 		td := testdata.GenerateTraces(2)
 		expectTraces = append(expectTraces, td)
 
+		headerBuf.Reset()
+		hpd.WriteField(hpack.HeaderField{
+			Name:  "seq",
+			Value: fmt.Sprint(i),
+		})
+		hpd.WriteField(hpack.HeaderField{
+			Name:  "test",
+			Value: "value",
+		})
+		expectMDs = append(expectMDs, metadata.MD{
+			"seq":  []string{fmt.Sprint(i)},
+			"test": []string{"value"},
+		})
+
 		batch, err := producer.BatchArrowRecordsFromTraces(td)
 		require.NoError(t, err)
+
+		batch.Headers = headerBuf.Bytes()
 
 		err = stream.Send(batch)
 		require.NoError(t, err)
@@ -1157,4 +1194,5 @@ func TestGRPCArrowReceiver(t *testing.T) {
 	require.NoError(t, ocr.Shutdown(context.Background()))
 
 	assert.Equal(t, expectTraces, sink.AllTraces())
+	assert.Equal(t, expectMDs, sink.MDs)
 }
