@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/apache/arrow/go/v11 v11.0.0-20221213164841-56cf063b5251
-	github.com/f5/otel-arrow-adapter v0.0.0-20221209234406-0e3c0d4657bf
+	github.com/f5/otel-arrow-adapter v0.0.0-20230112224802-dafb6df21c97
 	github.com/golang/mock v1.6.0
 	github.com/stretchr/testify v1.8.1
 	go.opentelemetry.io/collector v0.68.0
@@ -15,7 +15,7 @@ require (
 	go.uber.org/atomic v1.10.0
 	go.uber.org/multierr v1.9.0
 	go.uber.org/zap v1.24.0
-	google.golang.org/genproto v0.0.0-20221018160656-63c7b68cfc55
+	google.golang.org/genproto v0.0.0-20221027153422-115e99e71e1c
 	google.golang.org/grpc v1.51.0
 	google.golang.org/protobuf v1.28.1
 )

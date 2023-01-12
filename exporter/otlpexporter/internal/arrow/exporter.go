@@ -33,8 +33,8 @@ import (
 // Exporter is 1:1 with exporter, isolates arrow-specific
 // functionality.
 type Exporter struct {
-	// settings contains Arrow-specific parameters.
-	settings Settings
+	// numStreams is the number of streams that will be used.
+	numStreams int
 
 	// newProducer returns a real (or mock) Producer.
 	newProducer func() arrowRecord.ProducerAPI
@@ -75,19 +75,19 @@ type Exporter struct {
 
 // NewExporter configures a new Exporter.
 func NewExporter(
-	settings Settings,
+	numStreams int,
 	newProducer func() arrowRecord.ProducerAPI,
 	telemetry component.TelemetrySettings,
 	client arrowpb.ArrowStreamServiceClient,
 	grpcOptions []grpc.CallOption,
 ) *Exporter {
 	return &Exporter{
-		settings:    settings,
+		numStreams:  numStreams,
 		newProducer: newProducer,
 		telemetry:   telemetry,
 		client:      client,
 		grpcOptions: grpcOptions,
-		returning:   make(chan *Stream, settings.NumStreams),
+		returning:   make(chan *Stream, numStreams),
 		ready:       nil,
 		cancel:      nil,
 	}
@@ -100,7 +100,7 @@ func (e *Exporter) Start(ctx context.Context) error {
 
 	e.cancel = cancel
 	e.wg.Add(1)
-	e.ready = newStreamPrioritizer(ctx, e.settings)
+	e.ready = newStreamPrioritizer(ctx, e.numStreams)
 
 	go e.runStreamController(ctx)
 
@@ -115,7 +115,7 @@ func (e *Exporter) runStreamController(bgctx context.Context) {
 	defer e.cancel()
 	defer e.wg.Done()
 
-	running := e.settings.NumStreams
+	running := e.numStreams
 
 	// Start the initial number of streams
 	for i := 0; i < running; i++ {

@@ -37,11 +37,6 @@ import (
 )
 
 var (
-	singleStreamSettings = Settings{
-		Enabled:    true,
-		NumStreams: 1,
-	}
-
 	twoTraces  = testdata.GenerateTraces(2)
 	twoMetrics = testdata.GenerateMetrics(2)
 	twoLogs    = testdata.GenerateLogs(2)

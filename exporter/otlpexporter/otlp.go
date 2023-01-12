@@ -101,7 +101,7 @@ func (e *baseExporter) start(ctx context.Context, host component.Host) (err erro
 	if e.config.Arrow != nil && e.config.Arrow.Enabled {
 		ctx := e.enhanceContext(context.Background())
 
-		e.arrow = arrow.NewExporter(*e.config.Arrow, func() arrowRecord.ProducerAPI {
+		e.arrow = arrow.NewExporter(e.config.Arrow.NumStreams, func() arrowRecord.ProducerAPI {
 			return arrowRecord.NewProducer()
 		}, e.settings.TelemetrySettings, arrowpb.NewArrowStreamServiceClient(e.clientConn), e.callOptions)
 

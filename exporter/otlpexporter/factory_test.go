@@ -29,7 +29,6 @@ import (
 	"go.opentelemetry.io/collector/config/configtls"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
 	"go.opentelemetry.io/collector/exporter/exportertest"
-	"go.opentelemetry.io/collector/exporter/otlpexporter/internal/arrow"
 	"go.opentelemetry.io/collector/internal/testutil"
 )
 
@@ -44,7 +43,7 @@ func TestCreateDefaultConfig(t *testing.T) {
 	assert.Equal(t, ocfg.QueueSettings, exporterhelper.NewDefaultQueueSettings())
 	assert.Equal(t, ocfg.TimeoutSettings, exporterhelper.NewDefaultTimeoutSettings())
 	assert.Equal(t, ocfg.Compression, configcompression.Gzip)
-	assert.Equal(t, ocfg.Arrow, &arrow.Settings{Enabled: false, NumStreams: 1})
+	assert.Equal(t, ocfg.Arrow, &ArrowSettings{Enabled: false, NumStreams: 1})
 }
 
 func TestCreateMetricsExporter(t *testing.T) {
@@ -227,7 +226,7 @@ func TestCreateArrowTracesExporter(t *testing.T) {
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig().(*Config)
 	cfg.GRPCClientSettings.Endpoint = testutil.GetAvailableLocalAddress(t)
-	cfg.Arrow = &arrow.Settings{
+	cfg.Arrow = &ArrowSettings{
 		Enabled:    true,
 		NumStreams: 1,
 	}

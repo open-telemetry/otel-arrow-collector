@@ -53,10 +53,9 @@ type streamTestCase struct {
 func newStreamTestCase(t *testing.T) *streamTestCase {
 	ctrl := gomock.NewController(t)
 	producer := arrowRecordMock.NewMockProducerAPI(ctrl)
-	aset := singleStreamSettings
 
 	bg, cancel := context.WithCancel(context.Background())
-	prio := newStreamPrioritizer(bg, aset)
+	prio := newStreamPrioritizer(bg, 1)
 
 	ctc := newCommonTestCase(t, NotNoisy)
 	cts := ctc.newMockStream(bg)

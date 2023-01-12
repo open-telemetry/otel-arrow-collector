@@ -61,9 +61,9 @@ type exporterTestCase struct {
 	exporter *Exporter
 }
 
-func newExporterTestCase(t *testing.T, noisy noisyTest, arrowset Settings) *exporterTestCase {
+func newExporterTestCase(t *testing.T, noisy noisyTest, numStreams int) *exporterTestCase {
 	ctc := newCommonTestCase(t, noisy)
-	exp := NewExporter(arrowset, func() arrowRecord.ProducerAPI {
+	exp := NewExporter(numStreams, func() arrowRecord.ProducerAPI {
 		// Mock the close function, use a real producer for testing dataflow.
 		prod := arrowRecordMock.NewMockProducerAPI(ctc.ctrl)
 		real := arrowRecord.NewProducer()
@@ -137,7 +137,7 @@ func statusUnrecognizedFor(id string) *arrowpb.BatchStatus {
 // TestArrowExporterSuccess tests a single Send through a healthy channel.
 func TestArrowExporterSuccess(t *testing.T) {
 	for _, inputData := range []interface{}{twoTraces, twoMetrics, twoLogs} {
-		tc := newExporterTestCase(t, NotNoisy, singleStreamSettings)
+		tc := newExporterTestCase(t, NotNoisy, 1)
 		channel := newHealthyTestChannel()
 
 		tc.streamCall.Times(1).DoAndReturn(tc.returnNewStream(channel))
@@ -197,7 +197,7 @@ func TestArrowExporterSuccess(t *testing.T) {
 
 // TestArrowExporterTimeout tests that single slow Send leads to context canceled.
 func TestArrowExporterTimeout(t *testing.T) {
-	tc := newExporterTestCase(t, NotNoisy, singleStreamSettings)
+	tc := newExporterTestCase(t, NotNoisy, 1)
 	channel := newUnresponsiveTestChannel()
 
 	tc.streamCall.Times(1).DoAndReturn(tc.returnNewStream(channel))
@@ -219,7 +219,7 @@ func TestArrowExporterTimeout(t *testing.T) {
 // TestConnectError tests that if the connetions fail fast the
 // stream object for some reason is nil.  This causes downgrade.
 func TestArrowExporterStreamConnectError(t *testing.T) {
-	tc := newExporterTestCase(t, NotNoisy, singleStreamSettings)
+	tc := newExporterTestCase(t, NotNoisy, 1)
 	channel := newConnectErrorTestChannel()
 
 	tc.streamCall.AnyTimes().DoAndReturn(tc.returnNewStream(channel))
@@ -241,7 +241,7 @@ func TestArrowExporterStreamConnectError(t *testing.T) {
 // Unimplemented code (as gRPC does) that the connection is downgraded
 // without error.
 func TestArrowExporterDowngrade(t *testing.T) {
-	tc := newExporterTestCase(t, NotNoisy, singleStreamSettings)
+	tc := newExporterTestCase(t, NotNoisy, 1)
 	channel := newArrowUnsupportedTestChannel()
 
 	tc.streamCall.AnyTimes().DoAndReturn(tc.returnNewStream(channel))
@@ -263,7 +263,7 @@ func TestArrowExporterDowngrade(t *testing.T) {
 // TestArrowExporterConnectTimeout tests that an error is returned to
 // the caller if the response does not arrive in time.
 func TestArrowExporterConnectTimeout(t *testing.T) {
-	tc := newExporterTestCase(t, NotNoisy, singleStreamSettings)
+	tc := newExporterTestCase(t, NotNoisy, 1)
 	channel := newDisconnectedTestChannel()
 
 	tc.streamCall.AnyTimes().DoAndReturn(tc.returnNewStream(channel))
@@ -286,7 +286,7 @@ func TestArrowExporterConnectTimeout(t *testing.T) {
 // TestArrowExporterStreamFailure tests that a single stream failure
 // followed by a healthy stream.
 func TestArrowExporterStreamFailure(t *testing.T) {
-	tc := newExporterTestCase(t, NotNoisy, singleStreamSettings)
+	tc := newExporterTestCase(t, NotNoisy, 1)
 	channel0 := newUnresponsiveTestChannel()
 	channel1 := newHealthyTestChannel()
 
@@ -322,14 +322,9 @@ func TestArrowExporterStreamFailure(t *testing.T) {
 // race between stream send and stream cancel, causing it to fully
 // exercise the removeReady() code path.
 func TestArrowExporterStreamRace(t *testing.T) {
-	// Two streams ensures every possibility.
-	tc := newExporterTestCase(t, Noisy, Settings{
-		Enabled: true,
-
-		// This creates the conditions likely to produce a
-		// stream race in prioritizer.go.
-		NumStreams: 20,
-	})
+	// This creates the conditions likely to produce a
+	// stream race in prioritizer.go.
+	tc := newExporterTestCase(t, Noisy, 20)
 
 	var tries atomic.Int32
 
@@ -376,7 +371,7 @@ func TestArrowExporterStreamRace(t *testing.T) {
 
 // TestArrowExporterStreaming tests 10 sends in a row.
 func TestArrowExporterStreaming(t *testing.T) {
-	tc := newExporterTestCase(t, NotNoisy, singleStreamSettings)
+	tc := newExporterTestCase(t, NotNoisy, 1)
 	channel := newHealthyTestChannel()
 
 	tc.streamCall.AnyTimes().DoAndReturn(tc.returnNewStream(channel))

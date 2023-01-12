@@ -44,7 +44,6 @@ import (
 	"go.opentelemetry.io/collector/config/configtls"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exportertest"
-	"go.opentelemetry.io/collector/exporter/otlpexporter/internal/arrow"
 	"go.opentelemetry.io/collector/internal/testdata"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
@@ -733,7 +732,7 @@ func testSendArrowTraces(t *testing.T, clientWaitForReady, streamServiceAvailabl
 		WaitForReady: clientWaitForReady,
 	}
 	// Arrow client is enabled, but the server doesn't support it.
-	cfg.Arrow = &arrow.Settings{
+	cfg.Arrow = &ArrowSettings{
 		Enabled:    true,
 		NumStreams: 1,
 	}
@@ -848,7 +847,7 @@ func TestSendArrowFailedTraces(t *testing.T) {
 		WaitForReady: true,
 	}
 	// Arrow client is enabled, but the server doesn't support it.
-	cfg.Arrow = &arrow.Settings{
+	cfg.Arrow = &ArrowSettings{
 		Enabled:    true,
 		NumStreams: 1,
 	}
