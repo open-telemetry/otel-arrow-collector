@@ -68,6 +68,8 @@ type Stream struct {
 type writeItem struct {
 	// records is a ptrace.Traces, plog.Logs, or pmetric.Metrics
 	records interface{}
+	// callCtx helps identify the callers gRPC headers
+	callCtx context.Context
 	// errCh is used by the stream reader to unblock the sender
 	errCh chan error
 }
@@ -316,6 +318,7 @@ func (s *Stream) SendAndWait(ctx context.Context, records interface{}) error {
 	errCh := make(chan error, 1)
 	s.toWrite <- writeItem{
 		records: records,
+		callCtx: ctx,
 		errCh:   errCh,
 	}
 
@@ -329,7 +332,7 @@ func (s *Stream) SendAndWait(ctx context.Context, records interface{}) error {
 }
 
 // encode produces the next batch of Arrow records.
-func (s *Stream) encode(records interface{}) (_ *arrowpb.BatchArrowRecords, retErr error) {
+func (s *Stream) encode(callCtx context.Context, records interface{}) (_ *arrowpb.BatchArrowRecords, retErr error) {
 	// Defensively, protect against panics in the Arrow producer function.
 	defer func() {
 		if err := recover(); err != nil {
@@ -348,5 +351,6 @@ func (s *Stream) encode(records interface{}) (_ *arrowpb.BatchArrowRecords, retE
 	default:
 		return nil, fmt.Errorf("unsupported OTLP type: %T", records)
 	}
+	// batch.Headers = grpc.
 	return batch, err
 }

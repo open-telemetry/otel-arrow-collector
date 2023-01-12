@@ -21,6 +21,8 @@ import (
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
 	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 	"go.uber.org/zap"
+	"golang.org/x/net/http2/hpack"
+	"google.golang.org/grpc/metadata"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
@@ -29,7 +31,9 @@ import (
 )
 
 const (
-	receiverTransport = "otlp-arrow"
+	receiverTransport   = "otlp-arrow"
+	hpackMaxDynamicSize = 4096
+	hpackMaxStringSize  = 4096
 )
 
 var (
@@ -78,8 +82,15 @@ func New(
 }
 
 func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStreamServer) error {
-	ctx := serverStream.Context()
+	streamCtx := serverStream.Context()
 	ac := r.newConsumer()
+
+	hdrs := metadata.MD{}
+
+	hp := hpack.NewDecoder(hpackMaxDynamicSize, func(hf hpack.HeaderField) {
+		hdrs[hf.Name] = append(hdrs[hf.Name], hf.Value)
+	})
+	hp.SetMaxStringLength(hpackMaxStringSize)
 	defer func() {
 		if err := ac.Close(); err != nil {
 			r.telemetry.Logger.Error("arrow stream close", zap.Error(err))
@@ -89,8 +100,8 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStre
 	for {
 		// See if the context has been canceled.
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-streamCtx.Done():
+			return streamCtx.Err()
 		default:
 		}
 
@@ -99,10 +110,21 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStre
 		if err != nil {
 			return err
 		}
+		// Reset, reparse the headers.
+		thisCtx := streamCtx
+
+		// Check for optional headers.
+		if hdrsBytes := req.GetHeaders(); len(hdrsBytes) != 0 {
+			// Write calls the emitFunc, entering directly into `hdrs`.
+			hp.Write(hdrsBytes)
+			thisCtx = metadata.NewIncomingContext(thisCtx, hdrs)
+			// Reset `hdrs`.
+			hdrs = metadata.MD{}
+		}
 
 		// Process records: an error in this code path does
 		// not necessarily break the stream.
-		err = r.processRecords(ctx, ac, req)
+		err = r.processRecords(thisCtx, ac, req)
 
 		// Note: Statuses can be batched: TODO: should we?
 		resp := &arrowpb.BatchStatus{}
