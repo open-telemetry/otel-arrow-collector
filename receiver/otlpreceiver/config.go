@@ -40,9 +40,6 @@ type Protocols struct {
 // ArrowSettings
 type ArrowSettings struct {
 	Enabled bool `mapstructure:"enabled"`
-
-	// TODO: Do we want a flag to disable the propagation of
-	// original gRPC metadata headers?  I do not think so.
 }
 
 // Config defines configuration for OTLP receiver.
