@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -30,6 +31,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
+	"golang.org/x/net/http2/hpack"
+	"google.golang.org/grpc/metadata"
 
 	"go.opentelemetry.io/collector/internal/testdata"
 	"go.opentelemetry.io/collector/pdata/plog"
@@ -405,6 +408,68 @@ func TestArrowExporterStreaming(t *testing.T) {
 		require.True(t, sent)
 
 		expectOutput = append(expectOutput, input)
+	}
+	// Stop the test conduit started above.  If the sender were
+	// still sending, it would panic on a closed channel.
+	close(channel.sent)
+	wg.Wait()
+
+	require.Equal(t, expectOutput, actualOutput)
+	require.NoError(t, tc.exporter.Shutdown(bg))
+}
+
+// TestArrowExporterHeaders tests a mix of outgoing context headers.
+func TestArrowExporterHeaders(t *testing.T) {
+	tc := newExporterTestCase(t, NotNoisy, 1)
+	channel := newHealthyTestChannel()
+
+	tc.streamCall.AnyTimes().DoAndReturn(tc.returnNewStream(channel))
+
+	bg := context.Background()
+	require.NoError(t, tc.exporter.Start(bg))
+
+	var expectOutput []metadata.MD
+	var actualOutput []metadata.MD
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		md := metadata.MD{}
+		hpd := hpack.NewDecoder(4096, func(f hpack.HeaderField) {
+			md[f.Name] = append(md[f.Name], f.Value)
+		})
+		for data := range channel.sent {
+			if len(data.Headers) == 0 {
+				actualOutput = append(actualOutput, nil)
+			} else {
+				_, err := hpd.Write(data.Headers)
+				require.NoError(t, err)
+				actualOutput = append(actualOutput, md)
+				md = metadata.MD{}
+			}
+			channel.recv <- statusOKFor(data.BatchId)
+		}
+	}()
+
+	for times := 0; times < 10; times++ {
+		input := testdata.GenerateTraces(2)
+		ctx := context.Background()
+
+		if times%2 == 0 {
+			md := metadata.MD{
+				"test":  []string{"value"},
+				"index": []string{fmt.Sprint(times)},
+			}
+			expectOutput = append(expectOutput, md)
+			ctx = metadata.NewOutgoingContext(ctx, md)
+		} else {
+			expectOutput = append(expectOutput, nil)
+		}
+
+		sent, err := tc.exporter.SendAndWait(ctx, input)
+		require.NoError(t, err)
+		require.True(t, sent)
 	}
 	// Stop the test conduit started above.  If the sender were
 	// still sending, it would panic on a closed channel.

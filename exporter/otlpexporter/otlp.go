@@ -127,6 +127,10 @@ func (e *baseExporter) shutdown(ctx context.Context) error {
 // arrowSendAndWait gets an available stream and tries to send using
 // Arrow if it is configured.  A (false, nil) result indicates for the
 // caller to fall back to ordinary OTLP.
+//
+// Note that ctx is has not had enhanceContext() called, meaning it
+// will have outgoing gRPC metadata only when an upstream processor or
+// receiver placed it there.
 func (e *baseExporter) arrowSendAndWait(ctx context.Context, data interface{}) (sent bool, _ error) {
 	if e.arrow == nil {
 		return false, nil

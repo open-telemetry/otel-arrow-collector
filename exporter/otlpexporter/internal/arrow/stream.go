@@ -15,6 +15,7 @@
 package arrow // import "go.opentelemetry.io/collector/exporter/otlpexporter/internal/arrow"
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -25,8 +26,10 @@ import (
 	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
+	"golang.org/x/net/http2/hpack"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	"go.opentelemetry.io/collector/component"
@@ -68,6 +71,9 @@ type Stream struct {
 type writeItem struct {
 	// records is a ptrace.Traces, plog.Logs, or pmetric.Metrics
 	records interface{}
+	// callCtx is the caller's context which may contain outgoing
+	// gRPC metadata from an upstream component.
+	callCtx context.Context
 	// errCh is used by the stream reader to unblock the sender
 	errCh chan error
 }
@@ -180,6 +186,10 @@ func (s *Stream) run(bgctx context.Context, client arrowpb.ArrowStreamServiceCli
 // performs a blocking send().  This returns when the data is in the write buffer,
 // the caller waiting on its error channel.
 func (s *Stream) write(ctx context.Context) {
+	// headers are encoding using hpack, reusing a buffer on each call.
+	var hdrsBuf bytes.Buffer
+	hdrsEnc := hpack.NewEncoder(&hdrsBuf)
+
 	for {
 		// Note: this can't block b/c stream has capacity &
 		// individual streams shut down synchronously.
@@ -214,6 +224,24 @@ func (s *Stream) write(ctx context.Context) {
 
 		// Let the receiver knows what to look for.
 		s.setBatchChannel(batch.BatchId, wri.errCh)
+
+		// Optionally include outgoing context, if present.  Note that
+		// if the OTLP exporter's gRPC Headers field was set, those
+		// headers were used to establish the stream; the caller's context
+		// has not been "enhanced" with the static Headers when
+		// captured, so if there is outgoing context it was set elsewhere.
+		if md, ok := metadata.FromOutgoingContext(wri.callCtx); ok {
+			hdrsBuf.Reset()
+			for key, vals := range md {
+				for _, val := range vals {
+					hdrsEnc.WriteField(hpack.HeaderField{
+						Name:  key,
+						Value: val,
+					})
+				}
+			}
+			batch.Headers = hdrsBuf.Bytes()
+		}
 
 		if err := s.client.Send(batch); err != nil {
 			// The error will be sent to errCh during cleanup for this stream.
@@ -316,6 +344,7 @@ func (s *Stream) SendAndWait(ctx context.Context, records interface{}) error {
 	errCh := make(chan error, 1)
 	s.toWrite <- writeItem{
 		records: records,
+		callCtx: ctx,
 		errCh:   errCh,
 	}
 
