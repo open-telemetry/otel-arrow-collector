@@ -53,7 +53,7 @@ func createDefaultConfig() component.Config {
 			// We almost read 0 bytes, so no need to tune ReadBufferSize.
 			WriteBufferSize: 512 * 1024,
 		},
-		Arrow: &ArrowSettings{
+		Arrow: ArrowSettings{
 			NumStreams: 1,
 			Enabled:    false,
 		},

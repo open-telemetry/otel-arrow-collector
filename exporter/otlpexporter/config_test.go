@@ -84,7 +84,7 @@ func TestUnmarshalConfig(t *testing.T) {
 				BalancerName:    "round_robin",
 				Auth:            &configauth.Authentication{AuthenticatorID: component.NewID("nop")},
 			},
-			Arrow: &ArrowSettings{
+			Arrow: ArrowSettings{
 				Enabled:    true,
 				NumStreams: 2,
 			},

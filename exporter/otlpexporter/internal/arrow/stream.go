@@ -225,11 +225,13 @@ func (s *Stream) write(ctx context.Context) {
 		// Let the receiver knows what to look for.
 		s.setBatchChannel(batch.BatchId, wri.errCh)
 
-		// Optionally include outgoing context, if present.  Note that
-		// if the OTLP exporter's gRPC Headers field was set, those
-		// headers were used to establish the stream; the caller's context
-		// has not been "enhanced" with the static Headers when
-		// captured, so if there is outgoing context it was set elsewhere.
+		// Optionally include outgoing context, if present.  Note that if
+		// the OTLP exporter's gRPC Headers field was set, those (static)
+		// headers were used to establish the stream.  The caller's context
+		// was returned by baseExporter.enhanceContext() includes the static
+		// headers plus optional client metadata.  Here, get whatever
+		// headers that gRPC would have transmitted for a unary RPC and
+		// convey them via the Arrow batch.
 		if md, ok := metadata.FromOutgoingContext(wri.callCtx); ok {
 			hdrsBuf.Reset()
 			for key, vals := range md {
@@ -245,10 +247,9 @@ func (s *Stream) write(ctx context.Context) {
 
 		if err := s.client.Send(batch); err != nil {
 			// The error will be sent to errCh during cleanup for this stream.
-			// TODO: Should we add debug-level logs for EOF and Canceled?
-			if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
-				s.telemetry.Logger.Error("arrow send", zap.Error(err))
-			}
+			// Note there are common cases like EOF and Canceled that we may
+			// wish to suppress in the logs if they become a problem.
+			s.telemetry.Logger.Error("arrow send", zap.Error(err))
 			return
 		}
 	}

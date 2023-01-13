@@ -39,6 +39,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"go.opentelemetry.io/collector/client"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/config/configtls"
@@ -234,6 +235,9 @@ func TestSendTraces(t *testing.T) {
 			"header": "header-value",
 		},
 	}
+	cfg.IncludeClientMetadataSettings.Headers = []string{
+		"callerid",
+	}
 	set := exportertest.NewNopCreateSettings()
 	set.BuildInfo.Description = "Collector"
 	set.BuildInfo.Version = "1.2.3test"
@@ -251,9 +255,18 @@ func TestSendTraces(t *testing.T) {
 	// Ensure that initially there is no data in the receiver.
 	assert.EqualValues(t, 0, rcv.requestCount.Load())
 
+	myCaller := "17"
+	callCtx := client.NewContext(context.Background(),
+		client.Info{
+			Metadata: client.NewMetadata(map[string][]string{
+				"callerid": {myCaller},
+			}),
+		},
+	)
+
 	// Send empty trace.
 	td := ptrace.NewTraces()
-	assert.NoError(t, exp.ConsumeTraces(context.Background(), td))
+	assert.NoError(t, exp.ConsumeTraces(callCtx, td))
 
 	// Wait until it is received.
 	assert.Eventually(t, func() bool {
@@ -266,7 +279,7 @@ func TestSendTraces(t *testing.T) {
 	// A trace with 2 spans.
 	td = testdata.GenerateTraces(2)
 
-	err = exp.ConsumeTraces(context.Background(), td)
+	err = exp.ConsumeTraces(callCtx, td)
 	assert.NoError(t, err)
 
 	// Wait until it is received.
@@ -281,10 +294,14 @@ func TestSendTraces(t *testing.T) {
 	assert.EqualValues(t, 2, rcv.requestCount.Load())
 	assert.EqualValues(t, td, rcv.getLastRequest())
 
+	// Test the static metadata
 	md := rcv.getMetadata()
 	require.EqualValues(t, md.Get("header"), expectedHeader)
 	require.Equal(t, len(md.Get("User-Agent")), 1)
 	require.Contains(t, md.Get("User-Agent")[0], "Collector/1.2.3test")
+
+	// Test the caller's metadata
+	require.EqualValues(t, []string{myCaller}, md.Get("callerid"))
 }
 
 func TestSendTracesWhenEndpointHasHttpScheme(t *testing.T) {
@@ -732,7 +749,7 @@ func testSendArrowTraces(t *testing.T, clientWaitForReady, streamServiceAvailabl
 		WaitForReady: clientWaitForReady,
 	}
 	// Arrow client is enabled, but the server doesn't support it.
-	cfg.Arrow = &ArrowSettings{
+	cfg.Arrow = ArrowSettings{
 		Enabled:    true,
 		NumStreams: 1,
 	}
@@ -847,7 +864,7 @@ func TestSendArrowFailedTraces(t *testing.T) {
 		WaitForReady: true,
 	}
 	// Arrow client is enabled, but the server doesn't support it.
-	cfg.Arrow = &ArrowSettings{
+	cfg.Arrow = ArrowSettings{
 		Enabled:    true,
 		NumStreams: 1,
 	}
