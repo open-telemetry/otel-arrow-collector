@@ -22,8 +22,8 @@ import (
 	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 	"go.uber.org/zap"
 	"golang.org/x/net/http2/hpack"
-	"google.golang.org/grpc/metadata"
 
+	"go.opentelemetry.io/collector/client"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/consumererror"
@@ -85,7 +85,7 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStre
 	streamCtx := serverStream.Context()
 	ac := r.newConsumer()
 
-	hdrs := metadata.MD{}
+	hdrs := map[string][]string{}
 
 	hp := hpack.NewDecoder(hpackMaxDynamicSize, func(hf hpack.HeaderField) {
 		hdrs[hf.Name] = append(hdrs[hf.Name], hf.Value)
@@ -96,6 +96,8 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStre
 			r.telemetry.Logger.Error("arrow stream close", zap.Error(err))
 		}
 	}()
+
+	connInfo := client.FromContext(streamCtx)
 
 	for {
 		// See if the context has been canceled.
@@ -118,10 +120,18 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStre
 			// Write calls the emitFunc, entering directly into `hdrs`.
 			hp.Write(hdrsBytes)
 
-			thisCtx = metadata.NewIncomingContext(thisCtx, hdrs)
+			// Note: We propagate the Addr and Auth of the stream
+			// connection but replace the Metadata, reasoning that
+			// the exporter has already done the same, i.e., these
+			// hdrs include whatever is in streamCtx.
+			thisCtx = client.NewContext(thisCtx, client.Info{
+				Addr:     connInfo.Addr,
+				Auth:     connInfo.Auth,
+				Metadata: client.NewMetadata(hdrs),
+			})
 
 			// Reset `hdrs`.
-			hdrs = metadata.MD{}
+			hdrs = map[string][]string{}
 		}
 
 		// Process records: an error in this code path does

@@ -32,10 +32,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
 	"golang.org/x/net/http2/hpack"
-	"google.golang.org/grpc/metadata"
 
 	otelAssert "github.com/f5/otel-arrow-adapter/pkg/otel/assert"
 
+	"go.opentelemetry.io/collector/client"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/consumer"
@@ -575,8 +575,7 @@ func TestReceiverHeaders(t *testing.T) {
 
 	const times = 10
 
-	var actualData []metadata.MD
-	expectData := []metadata.MD{
+	expectData := []map[string][]string{
 		{"k1": []string{"v1"}},
 		nil,
 		{"k2": []string{"v2"}, "k3": []string{"v3"}},
@@ -618,12 +617,13 @@ func TestReceiverHeaders(t *testing.T) {
 		close(ctc.receive)
 	}()
 
-	for _ = range expectData {
-		md, _ := metadata.FromIncomingContext((<-ctc.consume).Ctx)
-		actualData = append(actualData, md)
-	}
+	for _, expect := range expectData {
+		info := client.FromContext((<-ctc.consume).Ctx)
 
-	assert.EqualValues(t, expectData, actualData)
+		for key, vals := range expect {
+			require.Equal(t, vals, info.Metadata.Get(key))
+		}
+	}
 
 	err := ctc.wait()
 	require.Error(t, err)

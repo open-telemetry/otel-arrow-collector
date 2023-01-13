@@ -41,6 +41,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"go.opentelemetry.io/collector/client"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config/configgrpc"
@@ -1112,14 +1113,12 @@ func (esc *errOrSinkConsumer) Reset() {
 
 type tracesSinkWithMetadata struct {
 	consumertest.TracesSink
-	MDs []metadata.MD
+	MDs []client.Metadata
 }
 
 func (ts *tracesSinkWithMetadata) ConsumeTraces(ctx context.Context, td ptrace.Traces) error {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if ok {
-		ts.MDs = append(ts.MDs, md)
-	}
+	info := client.FromContext(ctx)
+	ts.MDs = append(ts.MDs, info.Metadata)
 	return ts.TracesSink.ConsumeTraces(ctx, td)
 }
 
@@ -1194,5 +1193,13 @@ func TestGRPCArrowReceiver(t *testing.T) {
 	require.NoError(t, ocr.Shutdown(context.Background()))
 
 	assert.Equal(t, expectTraces, sink.AllTraces())
-	assert.Equal(t, expectMDs, sink.MDs)
+
+	assert.Equal(t, len(expectMDs), len(sink.MDs))
+	// gRPC adds its own metadata keys, so we check for only the
+	// expected ones below:
+	for idx := range expectMDs {
+		for key, vals := range expectMDs[idx] {
+			require.Equal(t, vals, sink.MDs[idx].Get(key), "for key %s", key)
+		}
+	}
 }
