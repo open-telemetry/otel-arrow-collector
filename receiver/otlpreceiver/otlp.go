@@ -151,7 +151,7 @@ func (r *otlpReceiver) startProtocolServers(host component.Host) error {
 		}
 
 		if r.cfg.Arrow != nil && r.cfg.Arrow.Enabled {
-			r.arrowReceiver, err = arrow.New(r.settings.ID, arrow.Consumers(r), r.settings, func() arrowRecord.ConsumerAPI {
+			r.arrowReceiver, err = arrow.New(r.settings.ID, arrow.Consumers(r), r.settings, r.cfg.GRPC, func() arrowRecord.ConsumerAPI {
 				return arrowRecord.NewConsumer()
 			})
 			if err != nil {

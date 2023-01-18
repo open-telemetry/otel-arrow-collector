@@ -1129,6 +1129,7 @@ func TestGRPCArrowReceiver(t *testing.T) {
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig().(*Config)
 	cfg.GRPC.NetAddr.Endpoint = addr
+	cfg.GRPC.IncludeMetadata = true
 	cfg.HTTP = nil
 	cfg.Arrow.Enabled = true
 	id := component.NewID("arrow")

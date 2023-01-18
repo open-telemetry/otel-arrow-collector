@@ -25,6 +25,7 @@ import (
 
 	"go.opentelemetry.io/collector/client"
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/obsreport"
@@ -55,6 +56,7 @@ type Receiver struct {
 
 	telemetry   component.TelemetrySettings
 	obsrecv     *obsreport.Receiver
+	gsettings   *configgrpc.GRPCServerSettings
 	newConsumer func() arrowRecord.ConsumerAPI
 }
 
@@ -63,6 +65,7 @@ func New(
 	id component.ID,
 	cs Consumers,
 	set component.ReceiverCreateSettings,
+	gsettings *configgrpc.GRPCServerSettings,
 	newConsumer func() arrowRecord.ConsumerAPI,
 ) (*Receiver, error) {
 	obs, err := obsreport.NewReceiver(obsreport.ReceiverSettings{
@@ -78,6 +81,7 @@ func New(
 		obsrecv:     obs,
 		telemetry:   set.TelemetrySettings,
 		newConsumer: newConsumer,
+		gsettings:   gsettings,
 	}, nil
 }
 
@@ -116,22 +120,26 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStre
 		// Check for optional headers and set the incoming context.
 		thisCtx := streamCtx
 
-		if hdrsBytes := req.GetHeaders(); len(hdrsBytes) != 0 {
-			// Write calls the emitFunc, entering directly into `hdrs`.
-			hp.Write(hdrsBytes)
+		// When configured, setup metadata.
+		if r.gsettings.IncludeMetadata {
+			if hdrsBytes := req.GetHeaders(); len(hdrsBytes) != 0 {
+				// Write calls the emitFunc, entering directly into `hdrs`.
+				hp.Write(hdrsBytes)
 
-			// Note: We propagate the Addr and Auth of the stream
-			// connection but replace the Metadata, reasoning that
-			// the exporter has already done the same, i.e., these
-			// hdrs include whatever is in streamCtx.
-			thisCtx = client.NewContext(thisCtx, client.Info{
-				Addr:     connInfo.Addr,
-				Auth:     connInfo.Auth,
-				Metadata: client.NewMetadata(hdrs),
-			})
+				// Note: We propagate the Addr and Auth of the stream
+				// connection but replace the Metadata, reasoning that
+				// the exporter has already done the same, i.e., these
+				// hdrs include whatever is in streamCtx.
+				// TODO: verify this.
+				thisCtx = client.NewContext(thisCtx, client.Info{
+					Addr:     connInfo.Addr,
+					Auth:     connInfo.Auth,
+					Metadata: client.NewMetadata(hdrs),
+				})
 
-			// Reset `hdrs`.
-			hdrs = map[string][]string{}
+				// Reset `hdrs`.
+				hdrs = map[string][]string{}
+			}
 		}
 
 		// Process records: an error in this code path does

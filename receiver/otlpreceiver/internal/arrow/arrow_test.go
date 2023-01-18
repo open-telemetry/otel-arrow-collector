@@ -38,6 +38,7 @@ import (
 	"go.opentelemetry.io/collector/client"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
+	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/internal/testdata"
 	"go.opentelemetry.io/collector/pdata/plog"
@@ -320,7 +321,11 @@ func (ctc *commonTestCase) newErrorConsumer() arrowRecord.ConsumerAPI {
 	return cons
 }
 
-func (ctc *commonTestCase) start(newConsumer func() arrowRecord.ConsumerAPI) {
+func (ctc *commonTestCase) start(newConsumer func() arrowRecord.ConsumerAPI, gopts ...func(cfg *configgrpc.GRPCServerSettings)) {
+	gsettings := &configgrpc.GRPCServerSettings{}
+	for _, gf := range gopts {
+		gf(gsettings)
+	}
 	rcvr, err := New(
 		component.NewID("arrowtest"),
 		ctc.consumers,
@@ -328,6 +333,7 @@ func (ctc *commonTestCase) start(newConsumer func() arrowRecord.ConsumerAPI) {
 			TelemetrySettings: ctc.telset,
 			BuildInfo:         component.NewDefaultBuildInfo(),
 		},
+		gsettings,
 		newConsumer,
 	)
 	if err != nil {
@@ -570,6 +576,11 @@ func TestReceiverEOF(t *testing.T) {
 }
 
 func TestReceiverHeaders(t *testing.T) {
+	t.Run("include", func(t *testing.T) { testReceiverHeaders(t, true) })
+	t.Run("noinclude", func(t *testing.T) { testReceiverHeaders(t, false) })
+}
+
+func testReceiverHeaders(t *testing.T, includeMeta bool) {
 	tc := healthyTestChannel{}
 	ctc := newCommonTestCase(t, tc)
 
@@ -587,7 +598,9 @@ func TestReceiverHeaders(t *testing.T) {
 
 	ctc.stream.EXPECT().Send(gomock.Any()).Times(len(expectData)).Return(nil)
 
-	ctc.start(ctc.newRealConsumer)
+	ctc.start(ctc.newRealConsumer, func(gsettings *configgrpc.GRPCServerSettings) {
+		gsettings.IncludeMetadata = includeMeta
+	})
 
 	go func() {
 		var hpb bytes.Buffer
@@ -621,7 +634,11 @@ func TestReceiverHeaders(t *testing.T) {
 		info := client.FromContext((<-ctc.consume).Ctx)
 
 		for key, vals := range expect {
-			require.Equal(t, vals, info.Metadata.Get(key))
+			if includeMeta {
+				require.Equal(t, vals, info.Metadata.Get(key))
+			} else {
+				require.Equal(t, []string(nil), info.Metadata.Get(key))
+			}
 		}
 	}
 
