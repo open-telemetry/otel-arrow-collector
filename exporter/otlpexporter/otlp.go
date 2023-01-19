@@ -56,8 +56,7 @@ type baseExporter struct {
 	clientConn     *grpc.ClientConn
 	metadata       metadata.MD
 	callOptions    []grpc.CallOption
-
-	settings component.ExporterCreateSettings
+	settings       exporter.CreateSettings
 
 	// Default user-agent header.
 	userAgent string
