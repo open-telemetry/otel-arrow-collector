@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
 	"golang.org/x/net/http2/hpack"
+	"google.golang.org/grpc/metadata"
 
 	otelAssert "github.com/f5/otel-arrow-adapter/pkg/otel/assert"
 
@@ -229,6 +230,9 @@ func newCommonTestCase(t *testing.T, tc testChannel) *commonTestCase {
 	stream := arrowCollectorMock.NewMockArrowStreamService_ArrowStreamServer(ctrl)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	ctx = metadata.NewIncomingContext(ctx, metadata.MD{
+		"stream_ctx": []string{"per-request"},
+	})
 
 	ctc := &commonTestCase{
 		ctrl:         ctrl,
@@ -632,6 +636,12 @@ func testReceiverHeaders(t *testing.T, includeMeta bool) {
 
 	for _, expect := range expectData {
 		info := client.FromContext((<-ctc.consume).Ctx)
+
+		// The static stream context contains one extra variable.
+		if expect == nil {
+			expect = map[string][]string{}
+		}
+		expect["stream_ctx"] = []string{"per-request"}
 
 		for key, vals := range expect {
 			if includeMeta {
