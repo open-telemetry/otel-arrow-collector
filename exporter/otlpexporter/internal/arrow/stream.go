@@ -29,7 +29,7 @@ import (
 	"golang.org/x/net/http2/hpack"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 
 	"go.opentelemetry.io/collector/component"
@@ -46,6 +46,9 @@ type Stream struct {
 
 	// prioritizer has a reference to the stream, this allows it to be severed.
 	prioritizer *streamPrioritizer
+
+	// perRPCCredentials from the auth extension, or nil.
+	perRPCCredentials credentials.PerRPCCredentials
 
 	// telemetry are a copy of the exporter's telemetry settings
 	telemetry component.TelemetrySettings
@@ -71,9 +74,8 @@ type Stream struct {
 type writeItem struct {
 	// records is a ptrace.Traces, plog.Logs, or pmetric.Metrics
 	records interface{}
-	// callCtx is the caller's context which may contain outgoing
-	// gRPC metadata from an upstream component.
-	callCtx context.Context
+	// md is the caller's metadata, derived from its context.
+	md map[string]string
 	// errCh is used by the stream reader to unblock the sender
 	errCh chan error
 }
@@ -83,13 +85,15 @@ func newStream(
 	producer arrowRecord.ProducerAPI,
 	prioritizer *streamPrioritizer,
 	telemetry component.TelemetrySettings,
+	perRPCCredentials credentials.PerRPCCredentials,
 ) *Stream {
 	return &Stream{
-		producer:    producer,
-		prioritizer: prioritizer,
-		telemetry:   telemetry,
-		toWrite:     make(chan writeItem, 1),
-		waiters:     map[string]chan error{},
+		producer:          producer,
+		prioritizer:       prioritizer,
+		perRPCCredentials: perRPCCredentials,
+		telemetry:         telemetry,
+		toWrite:           make(chan writeItem, 1),
+		waiters:           map[string]chan error{},
 	}
 }
 
@@ -225,22 +229,14 @@ func (s *Stream) write(ctx context.Context) {
 		// Let the receiver knows what to look for.
 		s.setBatchChannel(batch.BatchId, wri.errCh)
 
-		// Optionally include outgoing context, if present.  Note that if
-		// the OTLP exporter's gRPC Headers field was set, those (static)
-		// headers were used to establish the stream.  The caller's context
-		// was returned by baseExporter.enhanceContext() includes the static
-		// headers plus optional client metadata.  Here, get whatever
-		// headers that gRPC would have transmitted for a unary RPC and
-		// convey them via the Arrow batch.
-		if md, ok := metadata.FromOutgoingContext(wri.callCtx); ok {
+		// Optionally include outgoing metadata, if present.
+		if len(wri.md) != 0 {
 			hdrsBuf.Reset()
-			for key, vals := range md {
-				for _, val := range vals {
-					hdrsEnc.WriteField(hpack.HeaderField{
-						Name:  key,
-						Value: val,
-					})
-				}
+			for key, val := range wri.md {
+				hdrsEnc.WriteField(hpack.HeaderField{
+					Name:  key,
+					Value: val,
+				})
 			}
 			batch.Headers = hdrsBuf.Bytes()
 		}
@@ -343,9 +339,30 @@ func (s *Stream) processBatchStatus(statuses []*arrowpb.StatusMessage) error {
 // received by the stream reader.
 func (s *Stream) SendAndWait(ctx context.Context, records interface{}) error {
 	errCh := make(chan error, 1)
+
+	// Note that if the OTLP exporter's gRPC Headers field was
+	// set, those (static) headers were used to establish the
+	// stream.  The caller's context was returned by
+	// baseExporter.enhanceContext() includes the static headers
+	// plus optional client metadata.  Here, get whatever
+	// headers that gRPC would have transmitted for a unary RPC
+	// and convey them via the Arrow batch.
+
+	// Note that the "uri" parameter to GetRequestMetadata is
+	// not used by the headersetter extension and is not well
+	// documented.  Since it's an optional list, we omit it.
+	var md map[string]string
+	if s.perRPCCredentials != nil {
+		var err error
+		md, err = s.perRPCCredentials.GetRequestMetadata(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
 	s.toWrite <- writeItem{
 		records: records,
-		callCtx: ctx,
+		md:      md,
 		errCh:   errCh,
 	}
 

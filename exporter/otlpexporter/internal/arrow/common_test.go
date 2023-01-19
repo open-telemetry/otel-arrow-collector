@@ -29,10 +29,12 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
+	"go.opentelemetry.io/collector/exporter/otlpexporter/internal/arrow/grpcmock"
 	"go.opentelemetry.io/collector/internal/testdata"
 )
 
@@ -49,11 +51,13 @@ type testChannel interface {
 }
 
 type commonTestCase struct {
-	ctrl          *gomock.Controller
-	telset        component.TelemetrySettings
-	observedLogs  *observer.ObservedLogs
-	serviceClient arrowpb.ArrowStreamServiceClient
-	streamCall    *gomock.Call
+	ctrl                *gomock.Controller
+	telset              component.TelemetrySettings
+	observedLogs        *observer.ObservedLogs
+	serviceClient       arrowpb.ArrowStreamServiceClient
+	streamCall          *gomock.Call
+	perRPCCredentials   credentials.PerRPCCredentials
+	requestMetadataCall *gomock.Call
 }
 
 type noisyTest bool
@@ -75,18 +79,27 @@ func newCommonTestCase(t *testing.T, noisy noisyTest) *commonTestCase {
 	ctrl := gomock.NewController(t)
 	telset, obslogs := newTestTelemetry(t, noisy)
 
+	creds := grpcmock.NewMockPerRPCCredentials(ctrl)
+	creds.EXPECT().RequireTransportSecurity().Times(0) // unused interface method
+	requestMetadataCall := creds.EXPECT().GetRequestMetadata(
+		gomock.Any(), // context.Context
+		gomock.Any(), // ...string (unused `uri` parameter)
+	).Times(0)
+
 	client := arrowCollectorMock.NewMockArrowStreamServiceClient(ctrl)
 
 	streamCall := client.EXPECT().ArrowStream(
 		gomock.Any(), // context.Context
-		gomock.Any(), // grpc.CallOption
+		gomock.Any(), // ...grpc.CallOption
 	).Times(0)
 	return &commonTestCase{
-		ctrl:          ctrl,
-		telset:        telset,
-		observedLogs:  obslogs,
-		serviceClient: client,
-		streamCall:    streamCall,
+		ctrl:                ctrl,
+		telset:              telset,
+		observedLogs:        obslogs,
+		serviceClient:       client,
+		streamCall:          streamCall,
+		perRPCCredentials:   creds,
+		requestMetadataCall: requestMetadataCall,
 	}
 }
 

@@ -23,12 +23,10 @@ import (
 	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 
 	"go.opentelemetry.io/collector/component"
 )
-
-// High-level TODOs:
-// TODO: Use the MAX_CONNECTION_AGE and MAX_CONNECTION_AGE_GRACE settings.
 
 // Exporter is 1:1 with exporter, isolates arrow-specific
 // functionality.
@@ -36,25 +34,28 @@ type Exporter struct {
 	// numStreams is the number of streams that will be used.
 	numStreams int
 
-	// newProducer returns a real (or mock) Producer.
-	newProducer func() arrowRecord.ProducerAPI
-
 	// telemetry includes logger, tracer, meter.
 	telemetry component.TelemetrySettings
-
-	// client uses the exporter's gRPC ClientConn (or is a mock, in tests).
-	client arrowpb.ArrowStreamServiceClient
 
 	// grpcOptions includes options used by the unary RPC methods,
 	// e.g., WaitForReady.
 	grpcOptions []grpc.CallOption
 
-	// ready prioritizes streams that are ready to send
-	ready *streamPrioritizer
+	// newProducer returns a real (or mock) Producer.
+	newProducer func() arrowRecord.ProducerAPI
+
+	// client uses the exporter's gRPC ClientConn (or is a mock, in tests).
+	client arrowpb.ArrowStreamServiceClient
+
+	// perRPCCredentials derived from the exporter's gRPC auth settings.
+	perRPCCredentials credentials.PerRPCCredentials
 
 	// returning is used to pass broken, gracefully-terminated,
 	// and otherwise to the stream controller.
 	returning chan *Stream
+
+	// ready prioritizes streams that are ready to send
+	ready *streamPrioritizer
 
 	// cancel cancels the background context of this
 	// Exporter, used for shutdown.
@@ -76,20 +77,20 @@ type Exporter struct {
 // NewExporter configures a new Exporter.
 func NewExporter(
 	numStreams int,
-	newProducer func() arrowRecord.ProducerAPI,
 	telemetry component.TelemetrySettings,
-	client arrowpb.ArrowStreamServiceClient,
 	grpcOptions []grpc.CallOption,
+	newProducer func() arrowRecord.ProducerAPI,
+	client arrowpb.ArrowStreamServiceClient,
+	perRPCCredentials credentials.PerRPCCredentials,
 ) *Exporter {
 	return &Exporter{
-		numStreams:  numStreams,
-		newProducer: newProducer,
-		telemetry:   telemetry,
-		client:      client,
-		grpcOptions: grpcOptions,
-		returning:   make(chan *Stream, numStreams),
-		ready:       nil,
-		cancel:      nil,
+		numStreams:        numStreams,
+		telemetry:         telemetry,
+		grpcOptions:       grpcOptions,
+		newProducer:       newProducer,
+		client:            client,
+		perRPCCredentials: perRPCCredentials,
+		returning:         make(chan *Stream, numStreams),
 	}
 }
 
@@ -156,7 +157,8 @@ func (e *Exporter) runStreamController(bgctx context.Context) {
 // down this call synchronously waits for and unblocks the consumers.
 func (e *Exporter) runArrowStream(ctx context.Context) {
 	producer := e.newProducer()
-	stream := newStream(producer, e.ready, e.telemetry)
+
+	stream := newStream(producer, e.ready, e.telemetry, e.perRPCCredentials)
 
 	defer func() {
 		if err := producer.Close(); err != nil {

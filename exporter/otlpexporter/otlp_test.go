@@ -16,7 +16,9 @@ package otlpexporter
 
 import (
 	"context"
+	"fmt"
 	"net"
+	"net/http"
 	"path/filepath"
 	"runtime"
 	"sync"
@@ -31,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 	"go.uber.org/zap/zaptest"
+	"golang.org/x/net/http2/hpack"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -40,11 +43,16 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	"go.opentelemetry.io/collector/client"
+	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
+	"go.opentelemetry.io/collector/config/configauth"
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/config/configtls"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exportertest"
+	"go.opentelemetry.io/collector/exporter/otlpexporter/internal/arrow/grpcmock"
+	"go.opentelemetry.io/collector/extension"
+	"go.opentelemetry.io/collector/extension/auth"
 	"go.opentelemetry.io/collector/internal/testdata"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
@@ -214,6 +222,50 @@ func otlpMetricsReceiverOnGRPCServer(ln net.Listener) *mockMetricsReceiver {
 	return rcv
 }
 
+type hostWithExtensions struct {
+	component.Host
+	exts map[component.ID]component.Component
+}
+
+func newHostWithExtensions(exts map[component.ID]component.Component) component.Host {
+	return &hostWithExtensions{
+		Host: componenttest.NewNopHost(),
+		exts: exts,
+	}
+}
+
+func (h *hostWithExtensions) GetExtensions() map[component.ID]component.Component {
+	return h.exts
+}
+
+type testAuthExtension struct {
+	extension.Extension
+
+	prc credentials.PerRPCCredentials
+}
+
+func newTestAuthExtension(t *testing.T, mdf func(ctx context.Context) map[string]string) auth.Client {
+	ctrl := gomock.NewController(t)
+	prc := grpcmock.NewMockPerRPCCredentials(ctrl)
+	prc.EXPECT().RequireTransportSecurity().AnyTimes().Return(false)
+	prc.EXPECT().GetRequestMetadata(gomock.Any(), gomock.Any()).AnyTimes().DoAndReturn(
+		func(ctx context.Context, _ ...string) (map[string]string, error) {
+			return mdf(ctx), nil
+		},
+	)
+	return &testAuthExtension{
+		prc: prc,
+	}
+}
+
+func (a *testAuthExtension) RoundTripper(base http.RoundTripper) (http.RoundTripper, error) {
+	return nil, fmt.Errorf("unused")
+}
+
+func (a *testAuthExtension) PerRPCCredentials() (credentials.PerRPCCredentials, error) {
+	return a.prc, nil
+}
+
 func TestSendTraces(t *testing.T) {
 	// Start an OTLP-compatible receiver.
 	ln, err := net.Listen("tcp", "localhost:")
@@ -225,6 +277,9 @@ func TestSendTraces(t *testing.T) {
 
 	// Start an OTLP exporter and point to the receiver.
 	factory := NewFactory()
+	authID := component.NewID("testauth")
+	expectedHeader := []string{"header-value"}
+
 	cfg := factory.CreateDefaultConfig().(*Config)
 	cfg.GRPCClientSettings = configgrpc.GRPCClientSettings{
 		Endpoint: ln.Addr().String(),
@@ -232,11 +287,11 @@ func TestSendTraces(t *testing.T) {
 			Insecure: true,
 		},
 		Headers: map[string]string{
-			"header": "header-value",
+			"header": expectedHeader[0],
 		},
-	}
-	cfg.IncludeClientMetadataSettings.Headers = []string{
-		"callerid",
+		Auth: &configauth.Authentication{
+			AuthenticatorID: authID,
+		},
 	}
 	set := exportertest.NewNopCreateSettings()
 	set.BuildInfo.Description = "Collector"
@@ -249,24 +304,37 @@ func TestSendTraces(t *testing.T) {
 		assert.NoError(t, exp.Shutdown(context.Background()))
 	}()
 
-	host := componenttest.NewNopHost()
+	host := newHostWithExtensions(
+		map[component.ID]component.Component{
+			authID: newTestAuthExtension(t, func(ctx context.Context) map[string]string {
+				return map[string]string{
+					"callerid": client.FromContext(ctx).Metadata.Get("in_callerid")[0],
+				}
+			}),
+		},
+	)
 	assert.NoError(t, exp.Start(context.Background(), host))
 
 	// Ensure that initially there is no data in the receiver.
 	assert.EqualValues(t, 0, rcv.requestCount.Load())
 
-	myCaller := "17"
-	callCtx := client.NewContext(context.Background(),
-		client.Info{
-			Metadata: client.NewMetadata(map[string][]string{
-				"callerid": {myCaller},
-			}),
-		},
-	)
+	newCallerContext := func(value string) context.Context {
+		return client.NewContext(context.Background(),
+			client.Info{
+				Metadata: client.NewMetadata(map[string][]string{
+					"in_callerid": {value},
+				}),
+			},
+		)
+	}
+	const caller1 = "caller1"
+	const caller2 = "caller2"
+	callCtx1 := newCallerContext(caller1)
+	callCtx2 := newCallerContext(caller2)
 
 	// Send empty trace.
 	td := ptrace.NewTraces()
-	assert.NoError(t, exp.ConsumeTraces(callCtx, td))
+	assert.NoError(t, exp.ConsumeTraces(callCtx1, td))
 
 	// Wait until it is received.
 	assert.Eventually(t, func() bool {
@@ -275,11 +343,16 @@ func TestSendTraces(t *testing.T) {
 
 	// Ensure it was received empty.
 	assert.EqualValues(t, 0, rcv.totalItems.Load())
+	md := rcv.getMetadata()
+
+	// Expect caller1 and the static header
+	require.EqualValues(t, expectedHeader, md.Get("header"))
+	require.EqualValues(t, []string{caller1}, md.Get("callerid"))
 
 	// A trace with 2 spans.
 	td = testdata.GenerateTraces(2)
 
-	err = exp.ConsumeTraces(callCtx, td)
+	err = exp.ConsumeTraces(callCtx2, td)
 	assert.NoError(t, err)
 
 	// Wait until it is received.
@@ -287,21 +360,19 @@ func TestSendTraces(t *testing.T) {
 		return rcv.requestCount.Load() > 1
 	}, 10*time.Second, 5*time.Millisecond)
 
-	expectedHeader := []string{"header-value"}
-
 	// Verify received span.
 	assert.EqualValues(t, 2, rcv.totalItems.Load())
 	assert.EqualValues(t, 2, rcv.requestCount.Load())
 	assert.EqualValues(t, td, rcv.getLastRequest())
 
 	// Test the static metadata
-	md := rcv.getMetadata()
-	require.EqualValues(t, md.Get("header"), expectedHeader)
+	md = rcv.getMetadata()
+	require.EqualValues(t, expectedHeader, md.Get("header"))
 	require.Equal(t, len(md.Get("User-Agent")), 1)
 	require.Contains(t, md.Get("User-Agent")[0], "Collector/1.2.3test")
 
-	// Test the caller's metadata
-	require.EqualValues(t, []string{myCaller}, md.Get("callerid"))
+	// Test the caller's dynamic metadata
+	require.EqualValues(t, []string{caller2}, md.Get("callerid"))
 }
 
 func TestSendTracesWhenEndpointHasHttpScheme(t *testing.T) {
@@ -740,6 +811,8 @@ func testSendArrowTraces(t *testing.T, clientWaitForReady, streamServiceAvailabl
 
 	// Start an OTLP exporter and point to the receiver.
 	factory := NewFactory()
+	authID := component.NewID("testauth")
+	expectedHeader := []string{"arrow-ftw"}
 	cfg := factory.CreateDefaultConfig().(*Config)
 	cfg.GRPCClientSettings = configgrpc.GRPCClientSettings{
 		Endpoint: ln.Addr().String(),
@@ -747,6 +820,12 @@ func testSendArrowTraces(t *testing.T, clientWaitForReady, streamServiceAvailabl
 			Insecure: true,
 		},
 		WaitForReady: clientWaitForReady,
+		Headers: map[string]string{
+			"header": expectedHeader[0],
+		},
+		Auth: &configauth.Authentication{
+			AuthenticatorID: authID,
+		},
 	}
 	// Arrow client is enabled, but the server doesn't support it.
 	cfg.Arrow = ArrowSettings{
@@ -764,7 +843,20 @@ func testSendArrowTraces(t *testing.T, clientWaitForReady, streamServiceAvailabl
 		assert.NoError(t, exp.Shutdown(context.Background()))
 	}()
 
-	host := componenttest.NewNopHost()
+	type isUserCall struct{}
+
+	host := newHostWithExtensions(
+		map[component.ID]component.Component{
+			authID: newTestAuthExtension(t, func(ctx context.Context) map[string]string {
+				if ctx.Value(isUserCall{}) == nil {
+					return nil
+				}
+				return map[string]string{
+					"callerid": "arrow",
+				}
+			}),
+		},
+	)
 	assert.NoError(t, exp.Start(context.Background(), host))
 
 	rcv, _ := otlpTracesReceiverOnGRPCServer(ln, false)
@@ -780,7 +872,10 @@ func testSendArrowTraces(t *testing.T, clientWaitForReady, streamServiceAvailabl
 
 	// Send two trace items.
 	td := testdata.GenerateTraces(2)
-	err = exp.ConsumeTraces(context.Background(), td)
+
+	// Set the context key indicating this is per-request state,
+	// so the auth extension returns data.
+	err = exp.ConsumeTraces(context.WithValue(context.Background(), isUserCall{}, true), td)
 	assert.NoError(t, err)
 
 	// Wait until it is received.
@@ -792,6 +887,11 @@ func testSendArrowTraces(t *testing.T, clientWaitForReady, streamServiceAvailabl
 	assert.EqualValues(t, int32(2), rcv.totalItems.Load())
 	assert.EqualValues(t, int32(1), rcv.requestCount.Load())
 	assert.EqualValues(t, td, rcv.getLastRequest())
+
+	// Expect the correct metadata, with or without arrow.
+	md := rcv.getMetadata()
+	require.EqualValues(t, []string{"arrow"}, md.Get("callerid"))
+	require.EqualValues(t, expectedHeader, md.Get("header"))
 }
 
 func okStatusFor(id string) *arrowpb.StatusMessage {
@@ -823,8 +923,11 @@ func (r *mockTracesReceiver) startStreamMockArrowTraces(t *testing.T, statusFor 
 		MockArrowStreamServiceServer: svc,
 	})
 	svc.EXPECT().ArrowStream(gomock.Any()).Times(1).DoAndReturn(func(realSrv arrowpb.ArrowStreamService_ArrowStreamServer) error {
-		ctx := context.Background()
 		consumer := arrowRecord.NewConsumer()
+		var hdrs []hpack.HeaderField
+		hdrsDecoder := hpack.NewDecoder(4096, func(hdr hpack.HeaderField) {
+			hdrs = append(hdrs, hdr)
+		})
 		for {
 			records, err := realSrv.Recv()
 			if status, ok := status.FromError(err); ok && status.Code() == codes.Canceled {
@@ -833,6 +936,23 @@ func (r *mockTracesReceiver) startStreamMockArrowTraces(t *testing.T, statusFor 
 			require.NoError(t, err)
 			got, err := consumer.TracesFrom(records)
 			require.NoError(t, err)
+
+			// Reset and parse headers
+			hdrs = nil
+			_, err = hdrsDecoder.Write(records.Headers)
+			require.NoError(t, err)
+			md, ok := metadata.FromIncomingContext(realSrv.Context())
+			require.True(t, ok)
+
+			for _, hf := range hdrs {
+				md[hf.Name] = append(md[hf.Name], hf.Value)
+			}
+
+			// Place the metadata into the context, where
+			// the test framework (independent of Arrow)
+			// receives it.
+			ctx := metadata.NewIncomingContext(context.Background(), md)
+
 			for _, traces := range got {
 				_, err := r.Export(ctx, ptraceotlp.NewExportRequestFromTraces(traces))
 				require.NoError(t, err)

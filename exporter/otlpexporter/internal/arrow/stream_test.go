@@ -60,7 +60,10 @@ func newStreamTestCase(t *testing.T) *streamTestCase {
 	ctc := newCommonTestCase(t, NotNoisy)
 	cts := ctc.newMockStream(bg)
 
-	stream := newStream(producer, prio, ctc.telset)
+	// metadata functionality is tested in exporter_test.go
+	ctc.requestMetadataCall.AnyTimes().Return(nil, nil)
+
+	stream := newStream(producer, prio, ctc.telset, ctc.perRPCCredentials)
 
 	fromTracesCall := producer.EXPECT().BatchArrowRecordsFromTraces(gomock.Any()).Times(0)
 	fromMetricsCall := producer.EXPECT().BatchArrowRecordsFromMetrics(gomock.Any()).Times(0)

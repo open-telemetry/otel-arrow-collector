@@ -28,10 +28,10 @@ import (
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"go.opentelemetry.io/collector/client"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/exporter"
@@ -103,9 +103,23 @@ func (e *baseExporter) start(ctx context.Context, host component.Host) (err erro
 		// Note this sets static outgoing context for all future stream requests.
 		ctx := e.enhanceContext(context.Background())
 
-		e.arrow = arrow.NewExporter(e.config.Arrow.NumStreams, func() arrowRecord.ProducerAPI {
+		var perRPCCreds credentials.PerRPCCredentials
+		if e.config.GRPCClientSettings.Auth != nil {
+			// Get the auth extension, we'll use it to enrich the request context.
+			authClient, err := e.config.GRPCClientSettings.Auth.GetClientAuthenticator(host.GetExtensions())
+			if err != nil {
+				return err
+			}
+
+			perRPCCreds, err = authClient.PerRPCCredentials()
+			if err != nil {
+				return err
+			}
+		}
+
+		e.arrow = arrow.NewExporter(e.config.Arrow.NumStreams, e.settings.TelemetrySettings, e.callOptions, func() arrowRecord.ProducerAPI {
 			return arrowRecord.NewProducer()
-		}, e.settings.TelemetrySettings, arrowpb.NewArrowStreamServiceClient(e.clientConn), e.callOptions)
+		}, arrowpb.NewArrowStreamServiceClient(e.clientConn), perRPCCreds)
 
 		if err := e.arrow.Start(ctx); err != nil {
 			return err
@@ -141,60 +155,41 @@ func (e *baseExporter) arrowSendAndWait(ctx context.Context, data interface{}) (
 }
 
 func (e *baseExporter) pushTraces(ctx context.Context, td ptrace.Traces) error {
-	ctx = e.enhanceContext(ctx)
 	if sent, err := e.arrowSendAndWait(ctx, td); err != nil {
 		return err
 	} else if sent {
 		return nil
 	}
 	req := ptraceotlp.NewExportRequestFromTraces(td)
-	_, err := e.traceExporter.Export(ctx, req, e.callOptions...)
+	_, err := e.traceExporter.Export(e.enhanceContext(ctx), req, e.callOptions...)
 	return processGRPCError(err)
 }
 
 func (e *baseExporter) pushMetrics(ctx context.Context, md pmetric.Metrics) error {
-	ctx = e.enhanceContext(ctx)
 	if sent, err := e.arrowSendAndWait(ctx, md); err != nil {
 		return err
 	} else if sent {
 		return nil
 	}
 	req := pmetricotlp.NewExportRequestFromMetrics(md)
-	_, err := e.metricExporter.Export(ctx, req, e.callOptions...)
+	_, err := e.metricExporter.Export(e.enhanceContext(ctx), req, e.callOptions...)
 	return processGRPCError(err)
 }
 
 func (e *baseExporter) pushLogs(ctx context.Context, ld plog.Logs) error {
-	ctx = e.enhanceContext(ctx)
 	if sent, err := e.arrowSendAndWait(ctx, ld); err != nil {
 		return err
 	} else if sent {
 		return nil
 	}
 	req := plogotlp.NewExportRequestFromLogs(ld)
-	_, err := e.logExporter.Export(ctx, req, e.callOptions...)
+	_, err := e.logExporter.Export(e.enhanceContext(ctx), req, e.callOptions...)
 	return processGRPCError(err)
 }
 
 func (e *baseExporter) enhanceContext(ctx context.Context) context.Context {
-	md := e.metadata
-
-	if len(e.config.IncludeClientMetadataSettings.Headers) > 0 {
-		// Merge the static and client metadata
-		md = md.Copy()
-
-		clientInfo := client.FromContext(ctx)
-
-		for _, hdr := range e.config.IncludeClientMetadataSettings.Headers {
-			// Note: this is an overwrite, not an append.
-			md[hdr] = clientInfo.Metadata.Get(hdr)
-		}
-
-		return metadata.NewOutgoingContext(ctx, md)
-	}
-
-	if md.Len() > 0 {
-		return metadata.NewOutgoingContext(ctx, md)
+	if e.metadata.Len() > 0 {
+		return metadata.NewOutgoingContext(ctx, e.metadata)
 	}
 
 	return ctx

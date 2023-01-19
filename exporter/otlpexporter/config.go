@@ -33,22 +33,7 @@ type Config struct {
 
 	configgrpc.GRPCClientSettings `mapstructure:",squash"` // squash ensures fields are correctly decoded in embedded struct.
 
-	IncludeClientMetadataSettings `mapstructure:"include_client_metadata"`
-
 	Arrow ArrowSettings `mapstructure:"arrow"`
-}
-
-// IncludeClientMetadataSettings lists client.Metadata keys to copy to outgoing
-// request contexts.
-//
-// Note: this probably belongs in a common location because it probably will
-// be required for the equivalent OTLP/HTTP exporter.  For now, this is
-// exclusive to the OTLP gRPC exporter.  Note that receivers should set
-// `IncludeMetadata` in their respective HTTP and gRPC server settings for
-// this functionality. Also, batching processors need to be similarly
-// configured to batch by client metadata.
-type IncludeClientMetadataSettings struct {
-	Headers []string `mapstructure:"headers"`
 }
 
 // ArrowSettings includes whether Arrow is enabled and the number of
