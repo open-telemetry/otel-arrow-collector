@@ -3,21 +3,21 @@ module go.opentelemetry.io/collector/exporter/otlpexporter
 go 1.18
 
 require (
-	github.com/apache/arrow/go/v11 v11.0.0-20221213164841-56cf063b5251
-	github.com/f5/otel-arrow-adapter v0.0.0-20230112224802-dafb6df21c97
+	github.com/apache/arrow/go/v11 v11.0.0-20230119180814-bf8780d0ff79
+	github.com/f5/otel-arrow-adapter v0.0.0-20230118230949-d38e712f96e3
 	github.com/golang/mock v1.6.0
 	github.com/stretchr/testify v1.8.1
-	go.opentelemetry.io/collector v0.68.0
-	go.opentelemetry.io/collector/component v0.68.0
-	go.opentelemetry.io/collector/confmap v0.68.0
-	go.opentelemetry.io/collector/consumer v0.68.0
-	go.opentelemetry.io/collector/pdata v1.0.0-rc2
+	go.opentelemetry.io/collector v0.69.1
+	go.opentelemetry.io/collector/component v0.69.1
+	go.opentelemetry.io/collector/confmap v0.69.1
+	go.opentelemetry.io/collector/consumer v0.69.1
+	go.opentelemetry.io/collector/pdata v1.0.0-rc3
 	go.uber.org/atomic v1.10.0
 	go.uber.org/multierr v1.9.0
 	go.uber.org/zap v1.24.0
 	golang.org/x/net v0.4.0
 	google.golang.org/genproto v0.0.0-20221202195650-67e5cbc046fd
-	google.golang.org/grpc v1.52.0
+	google.golang.org/grpc v1.51.0
 	google.golang.org/protobuf v1.28.1
 )
 
@@ -55,12 +55,13 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.opencensus.io v0.24.0 // indirect
-	go.opentelemetry.io/collector/featuregate v0.68.0 // indirect
+	go.opentelemetry.io/collector/featuregate v0.69.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.37.0 // indirect
 	go.opentelemetry.io/otel v1.11.2 // indirect
 	go.opentelemetry.io/otel/metric v0.34.0 // indirect
 	go.opentelemetry.io/otel/trace v1.11.2 // indirect
 	golang.org/x/mod v0.6.0 // indirect
+	golang.org/x/oauth2 v0.0.0-20221014153046-6fdb5e3db783 // indirect
 	golang.org/x/sys v0.3.0 // indirect
 	golang.org/x/text v0.5.0 // indirect
 	golang.org/x/tools v0.2.0 // indirect
