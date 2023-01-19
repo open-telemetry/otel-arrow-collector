@@ -217,29 +217,35 @@ func (s *Stream) write(ctx context.Context) {
 
 		batch, err := s.encode(wri.records)
 		if err != nil {
-			// TODO: Is this not permanent?  Another
-			// sequence of data might not produce it.
-			//
-			// This is some kind of internal error.
+			// This is some kind of internal error.  We will restart the
+			// stream and mark this record as a permanent one.
 			wri.errCh <- consumererror.NewPermanent(err)
 			s.telemetry.Logger.Error("arrow encode", zap.Error(err))
 			return
 		}
 
-		// Let the receiver knows what to look for.
-		s.setBatchChannel(batch.BatchId, wri.errCh)
-
 		// Optionally include outgoing metadata, if present.
 		if len(wri.md) != 0 {
 			hdrsBuf.Reset()
 			for key, val := range wri.md {
-				hdrsEnc.WriteField(hpack.HeaderField{
+				err := hdrsEnc.WriteField(hpack.HeaderField{
 					Name:  key,
 					Value: val,
 				})
+				if err != nil {
+					// This case is like the encode-failure case
+					// above, we will restart the stream but consider
+					// this a permenent error.
+					wri.errCh <- consumererror.NewPermanent(err)
+					s.telemetry.Logger.Error("hpack encode", zap.Error(err))
+					return
+				}
 			}
 			batch.Headers = hdrsBuf.Bytes()
 		}
+
+		// Let the receiver knows what to look for.
+		s.setBatchChannel(batch.BatchId, wri.errCh)
 
 		if err := s.client.Send(batch); err != nil {
 			// The error will be sent to errCh during cleanup for this stream.
