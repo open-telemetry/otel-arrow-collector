@@ -27,14 +27,13 @@ import (
 	arrowCollectorMock "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1/mock"
 	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 	arrowRecordMock "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record/mock"
+	otelAssert "github.com/f5/otel-arrow-adapter/pkg/otel/assert"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
 	"golang.org/x/net/http2/hpack"
 	"google.golang.org/grpc/metadata"
-
-	otelAssert "github.com/f5/otel-arrow-adapter/pkg/otel/assert"
 
 	"go.opentelemetry.io/collector/client"
 	"go.opentelemetry.io/collector/component"
@@ -45,6 +44,7 @@ import (
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
+	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/arrow/mock"
 )
 
@@ -333,7 +333,7 @@ func (ctc *commonTestCase) start(newConsumer func() arrowRecord.ConsumerAPI, gop
 	rcvr, err := New(
 		component.NewID("arrowtest"),
 		ctc.consumers,
-		component.ReceiverCreateSettings{
+		receiver.CreateSettings{
 			TelemetrySettings: ctc.telset,
 			BuildInfo:         component.NewDefaultBuildInfo(),
 		},
@@ -588,8 +588,6 @@ func testReceiverHeaders(t *testing.T, includeMeta bool) {
 	tc := healthyTestChannel{}
 	ctc := newCommonTestCase(t, tc)
 
-	const times = 10
-
 	expectData := []map[string][]string{
 		{"k1": []string{"v1"}},
 		nil,
@@ -619,10 +617,11 @@ func testReceiverHeaders(t *testing.T, includeMeta bool) {
 				hpb.Reset()
 				for key, vals := range md {
 					for _, val := range vals {
-						hpe.WriteField(hpack.HeaderField{
+						err := hpe.WriteField(hpack.HeaderField{
 							Name:  key,
 							Value: val,
 						})
+						require.NoError(t, err)
 					}
 				}
 
@@ -667,4 +666,128 @@ func TestReceiverCancel(t *testing.T) {
 	err := ctc.wait()
 	require.Error(t, err)
 	require.True(t, errors.Is(err, context.Canceled))
+}
+
+func requireContainsAll(t *testing.T, md client.Metadata, exp map[string][]string) {
+	for key, vals := range exp {
+		require.Equal(t, vals, md.Get(key))
+	}
+}
+
+func requireContainsNone(t *testing.T, md client.Metadata, exp map[string][]string) {
+	for key := range exp {
+		require.Equal(t, []string(nil), md.Get(key))
+	}
+}
+
+func TestHeaderReceiverStreamContextOnly(t *testing.T) {
+	expect := map[string][]string{
+		"K": {"k1", "k2"},
+		"L": {"l1"},
+	}
+
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.MD(expect))
+
+	h := newHeaderReceiver(ctx, true)
+
+	for i := 0; i < 3; i++ {
+		cc, err := h.combineHeaders(ctx, nil)
+
+		require.NoError(t, err)
+		requireContainsAll(t, client.FromContext(cc).Metadata, expect)
+	}
+}
+
+func TestHeaderReceiverNoIncludeMetadata(t *testing.T) {
+	noExpect := map[string][]string{
+		"K": {"k1", "k2"},
+		"L": {"l1"},
+	}
+
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.MD(noExpect))
+
+	h := newHeaderReceiver(ctx, false)
+
+	for i := 0; i < 3; i++ {
+		cc, err := h.combineHeaders(ctx, nil)
+
+		require.NoError(t, err)
+		requireContainsNone(t, client.FromContext(cc).Metadata, noExpect)
+	}
+}
+
+func TestHeaderReceiverRequestNoStreamMetadata(t *testing.T) {
+	expect := map[string][]string{
+		"K": {"k1", "k2"},
+		"L": {"l1"},
+	}
+
+	var hpb bytes.Buffer
+
+	hpe := hpack.NewEncoder(&hpb)
+
+	ctx := context.Background()
+
+	h := newHeaderReceiver(ctx, true)
+
+	for i := 0; i < 3; i++ {
+		hpb.Reset()
+
+		for key, vals := range expect {
+			for _, val := range vals {
+				err := hpe.WriteField(hpack.HeaderField{
+					Name:  key,
+					Value: val,
+				})
+				require.NoError(t, err)
+			}
+		}
+
+		cc, err := h.combineHeaders(ctx, hpb.Bytes())
+
+		require.NoError(t, err)
+		requireContainsAll(t, client.FromContext(cc).Metadata, expect)
+	}
+}
+
+func TestHeaderReceiverBothMetadata(t *testing.T) {
+	expectK := map[string][]string{
+		"K": {"k1", "k2"},
+	}
+	expectL := map[string][]string{
+		"L": {"l1"},
+		"M": {"m1", "m2"},
+	}
+	expect := map[string][]string{
+		"K": {"k1", "k2"},
+		"L": {"l1"},
+		"M": {"m1", "m2"},
+	}
+
+	var hpb bytes.Buffer
+
+	hpe := hpack.NewEncoder(&hpb)
+
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.MD(expectK))
+
+	h := newHeaderReceiver(ctx, true)
+
+	for i := 0; i < 3; i++ {
+		hpb.Reset()
+
+		for key, vals := range expectL {
+			for _, val := range vals {
+				err := hpe.WriteField(hpack.HeaderField{
+					Name:  key,
+					Value: val,
+				})
+				require.NoError(t, err)
+			}
+		}
+
+		cc, err := h.combineHeaders(ctx, hpb.Bytes())
+
+		require.NoError(t, err)
+		requireContainsAll(t, client.FromContext(cc).Metadata, expect)
+	}
 }

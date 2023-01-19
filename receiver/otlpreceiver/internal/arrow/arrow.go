@@ -30,12 +30,12 @@ import (
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/consumererror"
 	"go.opentelemetry.io/collector/obsreport"
+	"go.opentelemetry.io/collector/receiver"
 )
 
 const (
 	receiverTransport   = "otlp-arrow"
 	hpackMaxDynamicSize = 4096
-	hpackMaxStringSize  = 4096
 )
 
 var (
@@ -65,7 +65,7 @@ type Receiver struct {
 func New(
 	id component.ID,
 	cs Consumers,
-	set component.ReceiverCreateSettings,
+	set receiver.CreateSettings,
 	gsettings *configgrpc.GRPCServerSettings,
 	newConsumer func() arrowRecord.ConsumerAPI,
 ) (*Receiver, error) {
@@ -86,33 +86,102 @@ func New(
 	}, nil
 }
 
+// headerReceiver contains the state necessary to decode per-request metadata
+// from an arrow stream.
+type headerReceiver struct {
+	// decoder maintains state across the stream.
+	decoder *hpack.Decoder
+
+	// client connection info from the stream context, to be extended
+	// with per-request metadata.
+	connInfo client.Info
+
+	// streamHdrs was translated from the incoming context, will be
+	// merged with per-request metadata.  Note that the contents of
+	// this map are equivalent to connInfo.Metadata, however that
+	// library does not let us iterate over the map so we recalculate
+	// this from the gRPC incoming stream context.
+	streamHdrs map[string][]string
+
+	// tmpHdrs is used by the decoder's emit function during Write.
+	tmpHdrs map[string][]string
+}
+
+func newHeaderReceiver(streamCtx context.Context, includeMetadata bool) *headerReceiver {
+	if !includeMetadata {
+		return nil
+	}
+	hr := &headerReceiver{
+		connInfo: client.FromContext(streamCtx),
+	}
+
+	if smd, ok := metadata.FromIncomingContext(streamCtx); ok {
+		hr.streamHdrs = smd
+	}
+
+	// Note the hpack decoder supports additional protections,
+	// such as SetMaxStringLength(), but as we already have limits
+	// on stream request size, this seems unnecessary.
+	hr.decoder = hpack.NewDecoder(hpackMaxDynamicSize, hr.tmpHdrsAppend)
+
+	return hr
+}
+
+// combineHeaders calculates per-request Metadata by combining the stream's
+// client.Info with additional key:values associated with the arrow batch.
+// This is safe to call when h is nil.
+func (h *headerReceiver) combineHeaders(ctx context.Context, hdrsBytes []byte) (context.Context, error) {
+	if h == nil || (len(hdrsBytes) == 0 && len(h.streamHdrs) == 0) {
+		return ctx, nil
+	}
+
+	if len(hdrsBytes) == 0 {
+		return h.newContext(ctx, h.streamHdrs), nil
+	}
+
+	h.tmpHdrs = map[string][]string{}
+
+	for k, v := range h.streamHdrs {
+		h.tmpHdrs[k] = v
+	}
+
+	// Write calls the emitFunc, appending directly into `tmpHrs`.
+	if _, err := h.decoder.Write(hdrsBytes); err != nil {
+		return ctx, err
+	}
+
+	// Release the temporary copy.
+	newHdrs := h.tmpHdrs
+	h.tmpHdrs = nil
+
+	return h.newContext(ctx, newHdrs), nil
+}
+
+// tmpHdrsAppend appends to tmpHdrs, from decoder's emit function.
+func (h *headerReceiver) tmpHdrsAppend(hf hpack.HeaderField) {
+	h.tmpHdrs[hf.Name] = append(h.tmpHdrs[hf.Name], hf.Value)
+}
+
+func (h *headerReceiver) newContext(ctx context.Context, hdrs map[string][]string) context.Context {
+	// Retain the Addr/Auth of the stream connection, update the
+	// per-request metadata from the Arrow batch.
+	return client.NewContext(ctx, client.Info{
+		Addr:     h.connInfo.Addr,
+		Auth:     h.connInfo.Auth,
+		Metadata: client.NewMetadata(hdrs),
+	})
+}
+
 func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStreamServer) error {
 	streamCtx := serverStream.Context()
 	ac := r.newConsumer()
+	hrcv := newHeaderReceiver(serverStream.Context(), r.gsettings.IncludeMetadata)
 
-	// hdrs is re-calculated for each request by resetting to a copy
-	// of the static incoming context.
-	var hdrs map[string][]string
-	resetHdrs := func() {
-		if md, ok := metadata.FromIncomingContext(serverStream.Context()); ok {
-			hdrs = map[string][]string(md)
-		} else {
-			hdrs = map[string][]string{}
-		}
-	}
-
-	// resetHdrs will be called before hp.Write()
-	hp := hpack.NewDecoder(hpackMaxDynamicSize, func(hf hpack.HeaderField) {
-		hdrs[hf.Name] = append(hdrs[hf.Name], hf.Value)
-	})
-	hp.SetMaxStringLength(hpackMaxStringSize)
 	defer func() {
 		if err := ac.Close(); err != nil {
 			r.telemetry.Logger.Error("arrow stream close", zap.Error(err))
 		}
 	}()
-
-	connInfo := client.FromContext(streamCtx)
 
 	for {
 		// See if the context has been canceled.
@@ -122,35 +191,18 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStre
 		default:
 		}
 
-		// Receive a batch:
+		// Receive a batch corresponding with one ptrace.Traces, pmetric.Metrics,
+		// or plog.Logs item.
 		req, err := serverStream.Recv()
 		if err != nil {
 			return err
 		}
 
 		// Check for optional headers and set the incoming context.
-		thisCtx := streamCtx
-
-		// When configured, setup metadata.
-		if r.gsettings.IncludeMetadata {
-			// Copy the incoming context.  Note we could avoid an allocation
-			// if req.Headers is empty, as then we would need one copy of the
-			// map, instead of one per request.
-			resetHdrs()
-
-			if hdrsBytes := req.GetHeaders(); len(hdrsBytes) != 0 {
-				// Write calls the emitFunc, appending directly into `hdrs`.
-				hp.Write(hdrsBytes)
-			}
-
-			// Retain the Addr/Auth of the stream
-			// connection, update the per-request metadata
-			// from the Arrow batch.
-			thisCtx = client.NewContext(thisCtx, client.Info{
-				Addr:     connInfo.Addr,
-				Auth:     connInfo.Auth,
-				Metadata: client.NewMetadata(hdrs),
-			})
+		thisCtx, err := hrcv.combineHeaders(streamCtx, req.GetHeaders())
+		if err != nil {
+			// Failing to parse the incoming headers breaks the stream.
+			return err
 		}
 
 		// Process records: an error in this code path does

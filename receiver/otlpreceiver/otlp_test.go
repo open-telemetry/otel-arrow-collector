@@ -1162,14 +1162,16 @@ func TestGRPCArrowReceiver(t *testing.T) {
 		expectTraces = append(expectTraces, td)
 
 		headerBuf.Reset()
-		hpd.WriteField(hpack.HeaderField{
+		err := hpd.WriteField(hpack.HeaderField{
 			Name:  "seq",
 			Value: fmt.Sprint(i),
 		})
-		hpd.WriteField(hpack.HeaderField{
+		require.NoError(t, err)
+		err = hpd.WriteField(hpack.HeaderField{
 			Name:  "test",
 			Value: "value",
 		})
+		require.NoError(t, err)
 		expectMDs = append(expectMDs, metadata.MD{
 			"seq":  []string{fmt.Sprint(i)},
 			"test": []string{"value"},
