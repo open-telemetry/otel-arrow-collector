@@ -32,13 +32,16 @@ import (
 	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/net/http2/hpack"
 	spb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"go.opentelemetry.io/collector/client"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config/configgrpc"
@@ -1108,13 +1111,25 @@ func (esc *errOrSinkConsumer) Reset() {
 	}
 }
 
+type tracesSinkWithMetadata struct {
+	consumertest.TracesSink
+	MDs []client.Metadata
+}
+
+func (ts *tracesSinkWithMetadata) ConsumeTraces(ctx context.Context, td ptrace.Traces) error {
+	info := client.FromContext(ctx)
+	ts.MDs = append(ts.MDs, info.Metadata)
+	return ts.TracesSink.ConsumeTraces(ctx, td)
+}
+
 func TestGRPCArrowReceiver(t *testing.T) {
 	addr := testutil.GetAvailableLocalAddress(t)
-	sink := new(consumertest.TracesSink)
+	sink := new(tracesSinkWithMetadata)
 
 	factory := NewFactory()
 	cfg := factory.CreateDefaultConfig().(*Config)
 	cfg.GRPC.NetAddr.Endpoint = addr
+	cfg.GRPC.IncludeMetadata = true
 	cfg.HTTP = nil
 	cfg.Arrow.Enabled = true
 	id := component.NewID("arrow")
@@ -1134,14 +1149,38 @@ func TestGRPCArrowReceiver(t *testing.T) {
 	require.NoError(t, err)
 	producer := arrowRecord.NewProducer()
 
+	var headerBuf bytes.Buffer
+	hpd := hpack.NewEncoder(&headerBuf)
+
 	var expectTraces []ptrace.Traces
-	// Repeatedly send traces via arrow
+	var expectMDs []metadata.MD
+
+	// Repeatedly send traces via arrow. Set the expected traces
+	// metadata to receive.
 	for i := 0; i < 10; i++ {
 		td := testdata.GenerateTraces(2)
 		expectTraces = append(expectTraces, td)
 
+		headerBuf.Reset()
+		err := hpd.WriteField(hpack.HeaderField{
+			Name:  "seq",
+			Value: fmt.Sprint(i),
+		})
+		require.NoError(t, err)
+		err = hpd.WriteField(hpack.HeaderField{
+			Name:  "test",
+			Value: "value",
+		})
+		require.NoError(t, err)
+		expectMDs = append(expectMDs, metadata.MD{
+			"seq":  []string{fmt.Sprint(i)},
+			"test": []string{"value"},
+		})
+
 		batch, err := producer.BatchArrowRecordsFromTraces(td)
 		require.NoError(t, err)
+
+		batch.Headers = headerBuf.Bytes()
 
 		err = stream.Send(batch)
 		require.NoError(t, err)
@@ -1157,4 +1196,13 @@ func TestGRPCArrowReceiver(t *testing.T) {
 	require.NoError(t, ocr.Shutdown(context.Background()))
 
 	assert.Equal(t, expectTraces, sink.AllTraces())
+
+	assert.Equal(t, len(expectMDs), len(sink.MDs))
+	// gRPC adds its own metadata keys, so we check for only the
+	// expected ones below:
+	for idx := range expectMDs {
+		for key, vals := range expectMDs[idx] {
+			require.Equal(t, vals, sink.MDs[idx].Get(key), "for key %s", key)
+		}
+	}
 }
