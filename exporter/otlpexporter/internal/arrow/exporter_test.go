@@ -314,11 +314,10 @@ func TestArrowExporterDisableDowngrade(t *testing.T) {
 	) {
 		defer func() { fails++ }()
 
-		if fails >= 3 {
-			return tc.returnNewStream(goodChannel)(ctx, opts...)
-		} else {
+		if fails < 3 {
 			return tc.returnNewStream(badChannel)(ctx, opts...)
 		}
+		return tc.returnNewStream(goodChannel)(ctx, opts...)
 	})
 
 	var wg sync.WaitGroup

@@ -34,7 +34,7 @@ type Exporter struct {
 	// numStreams is the number of streams that will be used.
 	numStreams int
 
-	// disableDowngrade prevents downgrade from occuring, supports
+	// disableDowngrade prevents downgrade from occurring, supports
 	// forcing Arrow transport.
 	disableDowngrade bool
 
