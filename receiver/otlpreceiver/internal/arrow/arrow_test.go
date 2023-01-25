@@ -338,6 +338,7 @@ func (ctc *commonTestCase) start(newConsumer func() arrowRecord.ConsumerAPI, gop
 			BuildInfo:         component.NewDefaultBuildInfo(),
 		},
 		gsettings,
+		nil,
 		newConsumer,
 	)
 	if err != nil {
@@ -691,7 +692,7 @@ func TestHeaderReceiverStreamContextOnly(t *testing.T) {
 	h := newHeaderReceiver(ctx, true)
 
 	for i := 0; i < 3; i++ {
-		cc, err := h.combineHeaders(ctx, nil)
+		cc, _, err := h.combineHeaders(ctx, nil)
 
 		require.NoError(t, err)
 		requireContainsAll(t, client.FromContext(cc).Metadata, expect)
@@ -709,7 +710,7 @@ func TestHeaderReceiverNoIncludeMetadata(t *testing.T) {
 	h := newHeaderReceiver(ctx, false)
 
 	for i := 0; i < 3; i++ {
-		cc, err := h.combineHeaders(ctx, nil)
+		cc, _, err := h.combineHeaders(ctx, nil)
 
 		require.NoError(t, err)
 		requireContainsNone(t, client.FromContext(cc).Metadata, noExpect)
@@ -743,7 +744,7 @@ func TestHeaderReceiverRequestNoStreamMetadata(t *testing.T) {
 			}
 		}
 
-		cc, err := h.combineHeaders(ctx, hpb.Bytes())
+		cc, _, err := h.combineHeaders(ctx, hpb.Bytes())
 
 		require.NoError(t, err)
 		requireContainsAll(t, client.FromContext(cc).Metadata, expect)
@@ -785,7 +786,7 @@ func TestHeaderReceiverBothMetadata(t *testing.T) {
 			}
 		}
 
-		cc, err := h.combineHeaders(ctx, hpb.Bytes())
+		cc, _, err := h.combineHeaders(ctx, hpb.Bytes())
 
 		require.NoError(t, err)
 		requireContainsAll(t, client.FromContext(cc).Metadata, expect)
@@ -831,7 +832,7 @@ func TestHeaderReceiverDuplicateMetadata(t *testing.T) {
 			}
 		}
 
-		cc, err := h.combineHeaders(ctx, hpb.Bytes())
+		cc, _, err := h.combineHeaders(ctx, hpb.Bytes())
 
 		require.NoError(t, err)
 		requireContainsAll(t, client.FromContext(cc).Metadata, expectCombined)
