@@ -236,8 +236,6 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStre
 		if authErr != nil {
 			err = authErr
 		} else {
-			fmt.Println("PROCESS IT", client.FromContext(thisCtx).Metadata)
-
 			err = r.processRecords(thisCtx, ac, req)
 		}
 
