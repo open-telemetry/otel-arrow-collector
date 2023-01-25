@@ -224,7 +224,8 @@ func (r *Receiver) ArrowStream(serverStream arrowpb.ArrowStreamService_ArrowStre
 
 		var authErr error
 		if r.authServer != nil {
-			if newCtx, err := r.authServer.Authenticate(thisCtx, authHdrs); err != nil {
+			var newCtx context.Context
+			if newCtx, err = r.authServer.Authenticate(thisCtx, authHdrs); err != nil {
 				authErr = err
 			} else {
 				thisCtx = newCtx
