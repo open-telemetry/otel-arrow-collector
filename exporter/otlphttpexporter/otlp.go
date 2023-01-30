@@ -147,6 +147,8 @@ func (e *baseExporter) export(ctx context.Context, url string, request []byte) e
 		// Request is successful.
 		return nil
 	}
+	data, _ := io.ReadAll(resp.Body)
+	fmt.Println("RESPONSE", resp, string(data))
 
 	respStatus := readResponse(resp)
 
