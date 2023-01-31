@@ -933,21 +933,23 @@ func testReceiverAuthHeaders(t *testing.T, includeMeta bool, dataAuth bool) {
 
 	var expectErrs []bool
 
-	for _, expect := range expectData {
+	for _, testInput := range expectData {
 		// The static stream context contains one extra variable.
-		if expect == nil {
-			expect = map[string][]string{}
+		cpy := map[string][]string{}
+		cpy["stream_ctx"] = []string{"per-request"}
+
+		for k, v := range testInput {
+			cpy[k] = v
 		}
-		expect["stream_ctx"] = []string{"per-request"}
 
 		expectErr := false
 		if dataAuth {
 			hasAuth := false
-			for _, val := range expect["auth"] {
+			for _, val := range cpy["auth"] {
 				hasAuth = hasAuth || (val == "true")
 			}
 			if hasAuth {
-				expect["has_auth"] = []string{":+1:", ":100:"}
+				cpy["has_auth"] = []string{":+1:", ":100:"}
 			} else {
 				expectErr = true
 			}
@@ -961,7 +963,7 @@ func testReceiverAuthHeaders(t *testing.T, includeMeta bool, dataAuth bool) {
 
 		info := client.FromContext((<-ctc.consume).Ctx)
 
-		for key, vals := range expect {
+		for key, vals := range cpy {
 			if includeMeta {
 				require.Equal(t, vals, info.Metadata.Get(key))
 			} else {
