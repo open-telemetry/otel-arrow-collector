@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
@@ -691,7 +692,7 @@ func TestHeaderReceiverStreamContextOnly(t *testing.T) {
 
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.MD(expect))
 
-	h := newHeaderReceiver(ctx, true)
+	h := newHeaderReceiver(ctx, nil, true)
 
 	for i := 0; i < 3; i++ {
 		cc, _, err := h.combineHeaders(ctx, nil)
@@ -709,13 +710,45 @@ func TestHeaderReceiverNoIncludeMetadata(t *testing.T) {
 
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.MD(noExpect))
 
-	h := newHeaderReceiver(ctx, false)
+	h := newHeaderReceiver(ctx, nil, false)
 
 	for i := 0; i < 3; i++ {
 		cc, _, err := h.combineHeaders(ctx, nil)
 
 		require.NoError(t, err)
 		requireContainsNone(t, client.FromContext(cc).Metadata, noExpect)
+	}
+}
+
+func TestHeaderReceiverAuthServerNoIncludeMetadata(t *testing.T) {
+	expectForAuth := map[string][]string{
+		"L": {"k1", "k2"},
+		"K": {"l1"},
+	}
+
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.MD(expectForAuth))
+
+	ctrl := gomock.NewController(t)
+	as := mock.NewMockServer(ctrl)
+
+	// The auth server is not called, it just needs to be non-nil.
+	as.EXPECT().Authenticate(gomock.Any(), gomock.Any()).Times(0)
+
+	h := newHeaderReceiver(ctx, as, false)
+
+	for i := 0; i < 3; i++ {
+		cc, hdrs, err := h.combineHeaders(ctx, nil)
+
+		// The incoming metadata keys are not in the context.
+		require.NoError(t, err)
+		requireContainsNone(t, client.FromContext(cc).Metadata, expectForAuth)
+
+		// Headers are returned for the auth server, though
+		// names have been forced to lower case.
+		require.Equal(t, len(hdrs), len(expectForAuth))
+		for k, v := range expectForAuth {
+			require.Equal(t, hdrs[strings.ToLower(k)], v)
+		}
 	}
 }
 
@@ -731,7 +764,7 @@ func TestHeaderReceiverRequestNoStreamMetadata(t *testing.T) {
 
 	ctx := context.Background()
 
-	h := newHeaderReceiver(ctx, true)
+	h := newHeaderReceiver(ctx, nil, true)
 
 	for i := 0; i < 3; i++ {
 		hpb.Reset()
@@ -739,7 +772,7 @@ func TestHeaderReceiverRequestNoStreamMetadata(t *testing.T) {
 		for key, vals := range expect {
 			for _, val := range vals {
 				err := hpe.WriteField(hpack.HeaderField{
-					Name:  key,
+					Name:  strings.ToLower(key),
 					Value: val,
 				})
 				require.NoError(t, err)
@@ -750,6 +783,63 @@ func TestHeaderReceiverRequestNoStreamMetadata(t *testing.T) {
 
 		require.NoError(t, err)
 		requireContainsAll(t, client.FromContext(cc).Metadata, expect)
+	}
+}
+
+func TestHeaderReceiverAuthServerIsSetNoIncludeMetadata(t *testing.T) {
+	expect := map[string][]string{
+		"K": {"k1", "k2"},
+		"L": {"l1"},
+	}
+
+	var hpb bytes.Buffer
+
+	hpe := hpack.NewEncoder(&hpb)
+
+	ctx := context.Background()
+
+	ctrl := gomock.NewController(t)
+	as := mock.NewMockServer(ctrl)
+
+	// The auth server is not called, it just needs to be non-nil.
+	as.EXPECT().Authenticate(gomock.Any(), gomock.Any()).Times(0)
+
+	h := newHeaderReceiver(ctx, as, true)
+
+	for i := 0; i < 3; i++ {
+		hpb.Reset()
+
+		for key, vals := range expect {
+			for _, val := range vals {
+				err := hpe.WriteField(hpack.HeaderField{
+					Name:  strings.ToLower(key),
+					Value: val,
+				})
+				require.NoError(t, err)
+			}
+		}
+
+		cc, hdrs, err := h.combineHeaders(ctx, hpb.Bytes())
+
+		require.NoError(t, err)
+
+		// Note: The call to client.Metadata.Get() inside
+		// requireContainsAll() actually modifies the metadata
+		// map (this is weird, but true and possibly
+		// valid). In cases where the input has incorrect
+		// case.  It's not safe to check that the map sizes
+		// are equal after calling Get() below, so we assert
+		// same size first.
+		require.Equal(t, len(hdrs), len(expect))
+
+		requireContainsAll(t, client.FromContext(cc).Metadata, expect)
+
+		// Headers passed to the auth server are equivalent w/
+		// with names forced to lower case.
+
+		for k, v := range expect {
+			require.Equal(t, hdrs[strings.ToLower(k)], v, "for %v", k)
+		}
 	}
 }
 
@@ -773,7 +863,7 @@ func TestHeaderReceiverBothMetadata(t *testing.T) {
 
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.MD(expectK))
 
-	h := newHeaderReceiver(ctx, true)
+	h := newHeaderReceiver(ctx, nil, true)
 
 	for i := 0; i < 3; i++ {
 		hpb.Reset()
@@ -781,7 +871,7 @@ func TestHeaderReceiverBothMetadata(t *testing.T) {
 		for key, vals := range expectL {
 			for _, val := range vals {
 				err := hpe.WriteField(hpack.HeaderField{
-					Name:  key,
+					Name:  strings.ToLower(key),
 					Value: val,
 				})
 				require.NoError(t, err)
@@ -819,7 +909,7 @@ func TestHeaderReceiverDuplicateMetadata(t *testing.T) {
 
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.MD(expectStream))
 
-	h := newHeaderReceiver(ctx, true)
+	h := newHeaderReceiver(ctx, nil, true)
 
 	for i := 0; i < 3; i++ {
 		hpb.Reset()
@@ -827,7 +917,7 @@ func TestHeaderReceiverDuplicateMetadata(t *testing.T) {
 		for key, vals := range expectRequest {
 			for _, val := range vals {
 				err := hpe.WriteField(hpack.HeaderField{
-					Name:  key,
+					Name:  strings.ToLower(key),
 					Value: val,
 				})
 				require.NoError(t, err)
@@ -916,7 +1006,7 @@ func testReceiverAuthHeaders(t *testing.T, includeMeta bool, dataAuth bool) {
 				for key, vals := range md {
 					for _, val := range vals {
 						err := hpe.WriteField(hpack.HeaderField{
-							Name:  key,
+							Name:  strings.ToLower(key),
 							Value: val,
 						})
 						require.NoError(t, err)
