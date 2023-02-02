@@ -144,7 +144,6 @@ func newHeaderReceiver(streamCtx context.Context, as auth.Server, includeMetadat
 
 // combineHeaders calculates per-request Metadata by combining the stream's
 // client.Info with additional key:values associated with the arrow batch.
-// This is safe to call when h is nil.
 func (h *headerReceiver) combineHeaders(ctx context.Context, hdrsBytes []byte) (context.Context, map[string][]string, error) {
 	if len(hdrsBytes) == 0 && len(h.streamHdrs) == 0 {
 		return ctx, nil, nil
@@ -159,7 +158,10 @@ func (h *headerReceiver) combineHeaders(ctx context.Context, hdrsBytes []byte) (
 	// modifying tmpHdrs if it is nil.
 	h.tmpHdrs = nil
 
-	if h.includeMetadata || h.hasAuthServer {
+	needMergedHeaders := h.includeMetadata || h.hasAuthServer
+
+	// If headers are being merged, allocate a new map.
+	if needMergedHeaders {
 		h.tmpHdrs = map[string][]string{}
 	}
 
@@ -168,7 +170,7 @@ func (h *headerReceiver) combineHeaders(ctx context.Context, hdrsBytes []byte) (
 		return ctx, nil, err
 	}
 
-	if h.tmpHdrs != nil {
+	if needMergedHeaders {
 		// Add streamHdrs that were not carried in the per-request headers.
 		for k, v := range h.streamHdrs {
 			// Note: This is done after the per-request metadata is defined
@@ -188,7 +190,7 @@ func (h *headerReceiver) combineHeaders(ctx context.Context, hdrsBytes []byte) (
 		}
 	}
 
-	// Release the temporary copy.
+	// Release the temporary copy used in emitFunc().
 	newHdrs := h.tmpHdrs
 	h.tmpHdrs = nil
 

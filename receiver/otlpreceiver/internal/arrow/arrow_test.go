@@ -786,7 +786,7 @@ func TestHeaderReceiverRequestNoStreamMetadata(t *testing.T) {
 	}
 }
 
-func TestHeaderReceiverRequestAuthServerNoStreamMetadata(t *testing.T) {
+func TestHeaderReceiverAuthServerIsSetNoIncludeMetadata(t *testing.T) {
 	expect := map[string][]string{
 		"K": {"k1", "k2"},
 		"L": {"l1"},
