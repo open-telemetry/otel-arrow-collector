@@ -19,12 +19,11 @@ require (
 require (
 	cloud.google.com/go/compute v1.15.1 // indirect
 	github.com/andybalholm/brotli v1.0.4 // indirect
-	github.com/apache/arrow/go/arrow v0.0.0-20211112161151-bc219186db40 // indirect
-	github.com/apache/arrow/go/v11 v11.0.0-20221209182902-0e14d1001b1e // indirect
+	github.com/apache/arrow/go/v11 v11.0.0 // indirect
 	github.com/apache/thrift v0.16.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/f5/otel-arrow-adapter v0.0.0-20230118230949-d38e712f96e3 // indirect
+	github.com/f5/otel-arrow-adapter v0.0.0-20230217204850-fec5f16b6730 // indirect
 	github.com/felixge/httpsnoop v1.0.3 // indirect
 	github.com/fxamacker/cbor/v2 v2.4.0 // indirect
 	github.com/go-logr/logr v1.2.3 // indirect

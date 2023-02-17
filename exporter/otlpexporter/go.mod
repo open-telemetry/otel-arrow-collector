@@ -3,8 +3,8 @@ module go.opentelemetry.io/collector/exporter/otlpexporter
 go 1.18
 
 require (
-	github.com/apache/arrow/go/v11 v11.0.0-20230119180814-bf8780d0ff79
-	github.com/f5/otel-arrow-adapter v0.0.0-20230118230949-d38e712f96e3
+	github.com/apache/arrow/go/v11 v11.0.0
+	github.com/f5/otel-arrow-adapter v0.0.0-20230217204850-fec5f16b6730
 	github.com/golang/mock v1.6.0
 	github.com/stretchr/testify v1.8.1
 	go.opentelemetry.io/collector v0.71.0
@@ -24,7 +24,6 @@ require (
 require (
 	cloud.google.com/go/compute v1.15.1 // indirect
 	github.com/andybalholm/brotli v1.0.4 // indirect
-	github.com/apache/arrow/go/arrow v0.0.0-20211112161151-bc219186db40 // indirect
 	github.com/apache/thrift v0.16.0 // indirect
 	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.0 // indirect
