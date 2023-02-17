@@ -24,6 +24,7 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
+	"go.opentelemetry.io/collector/connector"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/consumertest"
 	"go.opentelemetry.io/collector/exporter"
@@ -181,10 +182,10 @@ func TestBuildPipelines(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			// Build the pipeline
-			pipelines, err := buildPipelines(context.Background(), pipelinesSettings{
+			pips, err := buildPipelines(context.Background(), pipelinesSettings{
 				Telemetry: componenttest.NewNopTelemetrySettings(),
 				BuildInfo: component.NewDefaultBuildInfo(),
-				Receivers: receiver.NewBuilder(
+				ReceiverBuilder: receiver.NewBuilder(
 					map[component.ID]component.Config{
 						component.NewID("examplereceiver"):              testcomponents.ExampleReceiverFactory.CreateDefaultConfig(),
 						component.NewIDWithName("examplereceiver", "1"): testcomponents.ExampleReceiverFactory.CreateDefaultConfig(),
@@ -192,7 +193,7 @@ func TestBuildPipelines(t *testing.T) {
 					map[component.Type]receiver.Factory{
 						testcomponents.ExampleReceiverFactory.Type(): testcomponents.ExampleReceiverFactory,
 					}),
-				Processors: processor.NewBuilder(
+				ProcessorBuilder: processor.NewBuilder(
 					map[component.ID]component.Config{
 						component.NewID("exampleprocessor"):              testcomponents.ExampleProcessorFactory.CreateDefaultConfig(),
 						component.NewIDWithName("exampleprocessor", "1"): testcomponents.ExampleProcessorFactory.CreateDefaultConfig(),
@@ -200,7 +201,7 @@ func TestBuildPipelines(t *testing.T) {
 					map[component.Type]processor.Factory{
 						testcomponents.ExampleProcessorFactory.Type(): testcomponents.ExampleProcessorFactory,
 					}),
-				Exporters: exporter.NewBuilder(
+				ExporterBuilder: exporter.NewBuilder(
 					map[component.ID]component.Config{
 						component.NewID("exampleexporter"):              testcomponents.ExampleExporterFactory.CreateDefaultConfig(),
 						component.NewIDWithName("exampleexporter", "1"): testcomponents.ExampleExporterFactory.CreateDefaultConfig(),
@@ -211,14 +212,16 @@ func TestBuildPipelines(t *testing.T) {
 				PipelineConfigs: test.pipelineConfigs,
 			})
 			assert.NoError(t, err)
+			assert.IsType(t, &builtPipelines{}, pips)
 
+			pipelines := pips.(*builtPipelines)
 			assert.NoError(t, pipelines.StartAll(context.Background(), componenttest.NewNopHost()))
 
 			for dt, pipeline := range test.pipelineConfigs {
 				// Verify exporters created, started and empty.
 				for _, expID := range pipeline.Exporters {
 					exp := pipelines.GetExporters()[dt.Type()][expID].(*testcomponents.ExampleExporter)
-					assert.True(t, exp.Started)
+					assert.True(t, exp.Started())
 					switch dt.Type() {
 					case component.DataTypeTraces:
 						assert.Len(t, exp.Traces, 0)
@@ -233,13 +236,13 @@ func TestBuildPipelines(t *testing.T) {
 				for i, procID := range pipeline.Processors {
 					processor := pipelines.pipelines[dt].processors[i]
 					assert.Equal(t, procID, processor.id)
-					assert.True(t, processor.comp.(*testcomponents.ExampleProcessor).Started)
+					assert.True(t, processor.comp.(*testcomponents.ExampleProcessor).Started())
 				}
 
 				// Verify receivers created, started and send data to confirm pipelines correctly connected.
 				for _, recvID := range pipeline.Receivers {
 					receiver := pipelines.allReceivers[dt.Type()][recvID].(*testcomponents.ExampleReceiver)
-					assert.True(t, receiver.Started)
+					assert.True(t, receiver.Started())
 				}
 			}
 
@@ -264,13 +267,13 @@ func TestBuildPipelines(t *testing.T) {
 				// Verify receivers shutdown.
 				for _, recvID := range pipeline.Receivers {
 					receiver := pipelines.allReceivers[dt.Type()][recvID].(*testcomponents.ExampleReceiver)
-					assert.True(t, receiver.Stopped)
+					assert.True(t, receiver.Stopped())
 				}
 
 				// Verify processors shutdown.
 				for i := range pipeline.Processors {
 					processor := pipelines.pipelines[dt].processors[i]
-					assert.True(t, processor.comp.(*testcomponents.ExampleProcessor).Stopped)
+					assert.True(t, processor.comp.(*testcomponents.ExampleProcessor).Stopped())
 				}
 
 				// Now verify that exporters received data, and are shutdown.
@@ -287,7 +290,7 @@ func TestBuildPipelines(t *testing.T) {
 						require.Len(t, exp.Logs, test.expectedRequests)
 						assert.EqualValues(t, testdata.GenerateLogs(1), exp.Logs[0])
 					}
-					assert.True(t, exp.Stopped)
+					assert.True(t, exp.Stopped())
 				}
 			}
 		})
@@ -577,19 +580,19 @@ func TestBuildErrors(t *testing.T) {
 			set := pipelinesSettings{
 				Telemetry: componenttest.NewNopTelemetrySettings(),
 				BuildInfo: component.NewDefaultBuildInfo(),
-				Receivers: receiver.NewBuilder(
+				ReceiverBuilder: receiver.NewBuilder(
 					test.ReceiverConfigs,
 					map[component.Type]receiver.Factory{
 						nopReceiverFactory.Type(): nopReceiverFactory,
 						badReceiverFactory.Type(): badReceiverFactory,
 					}),
-				Processors: processor.NewBuilder(
+				ProcessorBuilder: processor.NewBuilder(
 					test.ProcessorConfigs,
 					map[component.Type]processor.Factory{
 						nopProcessorFactory.Type(): nopProcessorFactory,
 						badProcessorFactory.Type(): badProcessorFactory,
 					}),
-				Exporters: exporter.NewBuilder(
+				ExporterBuilder: exporter.NewBuilder(
 					test.ExporterConfigs,
 					map[component.Type]exporter.Factory{
 						nopExporterFactory.Type(): nopExporterFactory,
@@ -615,7 +618,7 @@ func TestFailToStartAndShutdown(t *testing.T) {
 	set := pipelinesSettings{
 		Telemetry: componenttest.NewNopTelemetrySettings(),
 		BuildInfo: component.NewDefaultBuildInfo(),
-		Receivers: receiver.NewBuilder(
+		ReceiverBuilder: receiver.NewBuilder(
 			map[component.ID]component.Config{
 				component.NewID(nopReceiverFactory.Type()): nopReceiverFactory.CreateDefaultConfig(),
 				component.NewID(errReceiverFactory.Type()): errReceiverFactory.CreateDefaultConfig(),
@@ -624,7 +627,7 @@ func TestFailToStartAndShutdown(t *testing.T) {
 				nopReceiverFactory.Type(): nopReceiverFactory,
 				errReceiverFactory.Type(): errReceiverFactory,
 			}),
-		Processors: processor.NewBuilder(
+		ProcessorBuilder: processor.NewBuilder(
 			map[component.ID]component.Config{
 				component.NewID(nopProcessorFactory.Type()): nopProcessorFactory.CreateDefaultConfig(),
 				component.NewID(errProcessorFactory.Type()): errProcessorFactory.CreateDefaultConfig(),
@@ -633,7 +636,7 @@ func TestFailToStartAndShutdown(t *testing.T) {
 				nopProcessorFactory.Type(): nopProcessorFactory,
 				errProcessorFactory.Type(): errProcessorFactory,
 			}),
-		Exporters: exporter.NewBuilder(
+		ExporterBuilder: exporter.NewBuilder(
 			map[component.ID]component.Config{
 				component.NewID(nopExporterFactory.Type()): nopExporterFactory.CreateDefaultConfig(),
 				component.NewID(errExporterFactory.Type()): errExporterFactory.CreateDefaultConfig(),
@@ -707,6 +710,12 @@ func newBadExporterFactory() exporter.Factory {
 	})
 }
 
+func newBadConnectorFactory() connector.Factory {
+	return connector.NewFactory("bf", func() component.Config {
+		return &struct{}{}
+	})
+}
+
 func newErrReceiverFactory() receiver.Factory {
 	return receiver.NewFactory("err",
 		func() component.Config { return &struct{}{} },
@@ -749,6 +758,42 @@ func newErrExporterFactory() exporter.Factory {
 		exporter.WithMetrics(func(context.Context, exporter.CreateSettings, component.Config) (exporter.Metrics, error) {
 			return &errComponent{}, nil
 		}, component.StabilityLevelUndefined),
+	)
+}
+
+func newErrConnectorFactory() connector.Factory {
+	return connector.NewFactory("err", func() component.Config {
+		return &struct{}{}
+	},
+		connector.WithTracesToTraces(func(context.Context, connector.CreateSettings, component.Config, consumer.Traces) (connector.Traces, error) {
+			return &errComponent{}, nil
+		}, component.StabilityLevelUnmaintained),
+		connector.WithTracesToMetrics(func(context.Context, connector.CreateSettings, component.Config, consumer.Metrics) (connector.Traces, error) {
+			return &errComponent{}, nil
+		}, component.StabilityLevelUnmaintained),
+		connector.WithTracesToLogs(func(context.Context, connector.CreateSettings, component.Config, consumer.Logs) (connector.Traces, error) {
+			return &errComponent{}, nil
+		}, component.StabilityLevelUnmaintained),
+
+		connector.WithMetricsToTraces(func(context.Context, connector.CreateSettings, component.Config, consumer.Traces) (connector.Metrics, error) {
+			return &errComponent{}, nil
+		}, component.StabilityLevelUnmaintained),
+		connector.WithMetricsToMetrics(func(context.Context, connector.CreateSettings, component.Config, consumer.Metrics) (connector.Metrics, error) {
+			return &errComponent{}, nil
+		}, component.StabilityLevelUnmaintained),
+		connector.WithMetricsToLogs(func(context.Context, connector.CreateSettings, component.Config, consumer.Logs) (connector.Metrics, error) {
+			return &errComponent{}, nil
+		}, component.StabilityLevelUnmaintained),
+
+		connector.WithLogsToTraces(func(context.Context, connector.CreateSettings, component.Config, consumer.Traces) (connector.Logs, error) {
+			return &errComponent{}, nil
+		}, component.StabilityLevelUnmaintained),
+		connector.WithLogsToMetrics(func(context.Context, connector.CreateSettings, component.Config, consumer.Metrics) (connector.Logs, error) {
+			return &errComponent{}, nil
+		}, component.StabilityLevelUnmaintained),
+		connector.WithLogsToLogs(func(context.Context, connector.CreateSettings, component.Config, consumer.Logs) (connector.Logs, error) {
+			return &errComponent{}, nil
+		}, component.StabilityLevelUnmaintained),
 	)
 }
 

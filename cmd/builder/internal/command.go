@@ -33,6 +33,7 @@ import (
 const (
 	skipCompilationFlag            = "skip-compilation"
 	skipGetModulesFlag             = "skip-get-modules"
+	ldflagsFlag                    = "ldflags"
 	distributionNameFlag           = "name"
 	distributionDescriptionFlag    = "description"
 	distributionVersionFlag        = "version"
@@ -86,6 +87,7 @@ configuration is provided, ocb will generate a default Collector.
 	// the distribution parameters, which we accept as CLI flags as well
 	cmd.Flags().BoolVar(&cfg.SkipCompilation, skipCompilationFlag, false, "Whether builder should only generate go code with no compile of the collector (default false)")
 	cmd.Flags().BoolVar(&cfg.SkipGetModules, skipGetModulesFlag, false, "Whether builder should skip updating go.mod and retrieve Go module list (default false)")
+	cmd.Flags().StringVar(&cfg.LDFlags, ldflagsFlag, "", `ldflags to include in the "go build" command`)
 	cmd.Flags().StringVar(&cfg.Distribution.Name, distributionNameFlag, "otelcol-custom", "The executable name for the OpenTelemetry Collector distribution")
 	if err := cmd.Flags().MarkDeprecated(distributionNameFlag, "use config distribution::name"); err != nil {
 		return nil, err
@@ -114,7 +116,6 @@ configuration is provided, ocb will generate a default Collector.
 	if err := cmd.Flags().MarkDeprecated(distributionModuleFlag, "use config distribution::module"); err != nil {
 		return nil, err
 	}
-
 	// version of this binary
 	cmd.AddCommand(versionCommand())
 
@@ -166,6 +167,7 @@ func applyCfgFromFile(flags *flag.FlagSet, cfgFromFile builder.Config) {
 	cfg.Extensions = cfgFromFile.Extensions
 	cfg.Receivers = cfgFromFile.Receivers
 	cfg.Processors = cfgFromFile.Processors
+	cfg.Connectors = cfgFromFile.Connectors
 	cfg.Replaces = cfgFromFile.Replaces
 	cfg.Excludes = cfgFromFile.Excludes
 
@@ -196,4 +198,5 @@ func applyCfgFromFile(flags *flag.FlagSet, cfgFromFile builder.Config) {
 	if !flags.Changed(distributionModuleFlag) && cfgFromFile.Distribution.Module != "" {
 		cfg.Distribution.Module = cfgFromFile.Distribution.Module
 	}
+	cfg.Distribution.DebugCompilation = cfgFromFile.Distribution.DebugCompilation
 }

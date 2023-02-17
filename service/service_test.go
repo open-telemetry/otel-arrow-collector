@@ -32,12 +32,11 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/confignet"
 	"go.opentelemetry.io/collector/config/configtelemetry"
+	"go.opentelemetry.io/collector/connector/connectortest"
 	"go.opentelemetry.io/collector/exporter/exportertest"
 	"go.opentelemetry.io/collector/extension"
 	"go.opentelemetry.io/collector/extension/extensiontest"
 	"go.opentelemetry.io/collector/extension/zpagesextension"
-	"go.opentelemetry.io/collector/featuregate"
-	"go.opentelemetry.io/collector/internal/obsreportconfig"
 	"go.opentelemetry.io/collector/internal/testutil"
 	"go.opentelemetry.io/collector/processor/processortest"
 	"go.opentelemetry.io/collector/receiver/receivertest"
@@ -156,6 +155,9 @@ func TestServiceGetFactory(t *testing.T) {
 	assert.Nil(t, srv.host.GetFactory(component.KindExporter, "wrongtype"))
 	assert.Equal(t, set.Exporters.Factory("nop"), srv.host.GetFactory(component.KindExporter, "nop"))
 
+	assert.Nil(t, srv.host.GetFactory(component.KindConnector, "wrongtype"))
+	assert.Equal(t, set.Connectors.Factory("nop"), srv.host.GetFactory(component.KindConnector, "nop"))
+
 	assert.Nil(t, srv.host.GetFactory(component.KindExtension, "wrongtype"))
 	assert.Equal(t, set.Extensions.Factory("nop"), srv.host.GetFactory(component.KindExtension, "nop"))
 
@@ -215,7 +217,11 @@ func TestServiceTelemetryCleanupOnError(t *testing.T) {
 func TestServiceTelemetryWithOpenCensusMetrics(t *testing.T) {
 	for _, tc := range ownMetricsTestCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			testCollectorStartHelper(t, featuregate.NewRegistry(), tc)
+			testCollectorStartHelper(t, false, false, tc)
+		})
+
+		t.Run(tc.name+"/connectors", func(t *testing.T) {
+			testCollectorStartHelper(t, false, true, tc)
 		})
 	}
 }
@@ -223,16 +229,16 @@ func TestServiceTelemetryWithOpenCensusMetrics(t *testing.T) {
 func TestServiceTelemetryWithOpenTelemetryMetrics(t *testing.T) {
 	for _, tc := range ownMetricsTestCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			registry := featuregate.NewRegistry()
-			obsreportconfig.RegisterInternalMetricFeatureGate(registry)
-			colTel := newColTelemetry(registry)
-			require.NoError(t, colTel.registry.Apply(map[string]bool{obsreportconfig.UseOtelForInternalMetricsfeatureGateID: true}))
-			testCollectorStartHelper(t, registry, tc)
+			testCollectorStartHelper(t, true, false, tc)
+		})
+
+		t.Run(tc.name+"/connectors", func(t *testing.T) {
+			testCollectorStartHelper(t, true, true, tc)
 		})
 	}
 }
 
-func testCollectorStartHelper(t *testing.T, reg *featuregate.Registry, tc ownMetricsTestCase) {
+func testCollectorStartHelper(t *testing.T, useOtel bool, useGraph bool, tc ownMetricsTestCase) {
 	var once sync.Once
 	loggingHookCalled := false
 	hook := func(entry zapcore.Entry) error {
@@ -251,7 +257,8 @@ func testCollectorStartHelper(t *testing.T, reg *featuregate.Registry, tc ownMet
 		map[component.ID]component.Config{component.NewID("zpages"): &zpagesextension.Config{TCPAddr: confignet.TCPAddr{Endpoint: zpagesAddr}}},
 		map[component.Type]extension.Factory{"zpages": zpagesextension.NewFactory()})
 	set.LoggingOptions = []zap.Option{zap.Hooks(hook)}
-	set.registry = reg
+	set.useOtel = &useOtel
+	set.useGraph = &useGraph
 
 	cfg := newNopConfig()
 	cfg.Extensions = []component.ID{component.NewID("zpages")}
@@ -271,7 +278,9 @@ func testCollectorStartHelper(t *testing.T, reg *featuregate.Registry, tc ownMet
 		// Sleep for 1 second to ensure the http server is started.
 		time.Sleep(1 * time.Second)
 		assert.True(t, loggingHookCalled)
-		assertMetrics(t, metricsAddr, tc.expectedLabels)
+		if !useOtel {
+			assertMetrics(t, metricsAddr, tc.expectedLabels)
+		}
 		assertZPages(t, zpagesAddr)
 		require.NoError(t, srv.Shutdown(context.Background()))
 	}
@@ -393,30 +402,35 @@ func newNopSettings() Settings {
 		Receivers:  receivertest.NewNopBuilder(),
 		Processors: processortest.NewNopBuilder(),
 		Exporters:  exportertest.NewNopBuilder(),
+		Connectors: connectortest.NewNopBuilder(),
 		Extensions: extensiontest.NewNopBuilder(),
 	}
 }
 
 func newNopConfig() Config {
+	return newNopConfigPipelineConfigs(map[component.ID]*PipelineConfig{
+		component.NewID("traces"): {
+			Receivers:  []component.ID{component.NewID("nop")},
+			Processors: []component.ID{component.NewID("nop")},
+			Exporters:  []component.ID{component.NewID("nop")},
+		},
+		component.NewID("metrics"): {
+			Receivers:  []component.ID{component.NewID("nop")},
+			Processors: []component.ID{component.NewID("nop")},
+			Exporters:  []component.ID{component.NewID("nop")},
+		},
+		component.NewID("logs"): {
+			Receivers:  []component.ID{component.NewID("nop")},
+			Processors: []component.ID{component.NewID("nop")},
+			Exporters:  []component.ID{component.NewID("nop")},
+		},
+	})
+}
+
+func newNopConfigPipelineConfigs(pipelineCfgs map[component.ID]*PipelineConfig) Config {
 	return Config{
 		Extensions: []component.ID{component.NewID("nop")},
-		Pipelines: map[component.ID]*PipelineConfig{
-			component.NewID("traces"): {
-				Receivers:  []component.ID{component.NewID("nop")},
-				Processors: []component.ID{component.NewID("nop")},
-				Exporters:  []component.ID{component.NewID("nop")},
-			},
-			component.NewID("metrics"): {
-				Receivers:  []component.ID{component.NewID("nop")},
-				Processors: []component.ID{component.NewID("nop")},
-				Exporters:  []component.ID{component.NewID("nop")},
-			},
-			component.NewID("logs"): {
-				Receivers:  []component.ID{component.NewID("nop")},
-				Processors: []component.ID{component.NewID("nop")},
-				Exporters:  []component.ID{component.NewID("nop")},
-			},
-		},
+		Pipelines:  pipelineCfgs,
 		Telemetry: telemetry.Config{
 			Logs: telemetry.LogsConfig{
 				Level:       zapcore.InfoLevel,
@@ -430,7 +444,7 @@ func newNopConfig() Config {
 				ErrorOutputPaths:  []string{"stderr"},
 				DisableCaller:     false,
 				DisableStacktrace: false,
-				InitialFields:     map[string]interface{}(nil),
+				InitialFields:     map[string]any(nil),
 			},
 			Metrics: telemetry.MetricsConfig{
 				Level:   configtelemetry.LevelBasic,

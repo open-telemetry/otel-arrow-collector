@@ -18,12 +18,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"sort"
 
 	"go.uber.org/multierr"
-	"go.uber.org/zap"
 
 	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/connector"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/processor"
@@ -31,7 +30,6 @@ import (
 	"go.opentelemetry.io/collector/service/internal/capabilityconsumer"
 	"go.opentelemetry.io/collector/service/internal/components"
 	"go.opentelemetry.io/collector/service/internal/fanoutconsumer"
-	"go.opentelemetry.io/collector/service/internal/zpages"
 )
 
 const (
@@ -39,6 +37,15 @@ const (
 	zComponentName = "zcomponentname"
 	zComponentKind = "zcomponentkind"
 )
+
+type pipelines interface {
+	StartAll(ctx context.Context, host component.Host) error
+	ShutdownAll(ctx context.Context) error
+	GetExporters() map[component.DataType]map[component.ID]component.Component
+	HandleZPages(w http.ResponseWriter, r *http.Request)
+}
+
+var _ pipelines = (*builtPipelines)(nil)
 
 // baseConsumer redeclared here since not public in consumer package. May consider to make that public.
 type baseConsumer interface {
@@ -77,7 +84,7 @@ func (bps *builtPipelines) StartAll(ctx context.Context, host component.Host) er
 	bps.telemetry.Logger.Info("Starting exporters...")
 	for dt, expByID := range bps.allExporters {
 		for expID, exp := range expByID {
-			expLogger := exporterLogger(bps.telemetry.Logger, expID, dt)
+			expLogger := components.ExporterLogger(bps.telemetry.Logger, expID, dt)
 			expLogger.Info("Exporter is starting...")
 			if err := exp.Start(ctx, components.NewHostWrapper(host, expLogger)); err != nil {
 				return err
@@ -89,7 +96,7 @@ func (bps *builtPipelines) StartAll(ctx context.Context, host component.Host) er
 	bps.telemetry.Logger.Info("Starting processors...")
 	for pipelineID, bp := range bps.pipelines {
 		for i := len(bp.processors) - 1; i >= 0; i-- {
-			procLogger := processorLogger(bps.telemetry.Logger, bp.processors[i].id, pipelineID)
+			procLogger := components.ProcessorLogger(bps.telemetry.Logger, bp.processors[i].id, pipelineID)
 			procLogger.Info("Processor is starting...")
 			if err := bp.processors[i].comp.Start(ctx, components.NewHostWrapper(host, procLogger)); err != nil {
 				return err
@@ -101,7 +108,7 @@ func (bps *builtPipelines) StartAll(ctx context.Context, host component.Host) er
 	bps.telemetry.Logger.Info("Starting receivers...")
 	for dt, recvByID := range bps.allReceivers {
 		for recvID, recv := range recvByID {
-			recvLogger := receiverLogger(bps.telemetry.Logger, recvID, dt)
+			recvLogger := components.ReceiverLogger(bps.telemetry.Logger, recvID, dt)
 			recvLogger.Info("Receiver is starting...")
 			if err := recv.Start(ctx, components.NewHostWrapper(host, recvLogger)); err != nil {
 				return err
@@ -158,43 +165,22 @@ func (bps *builtPipelines) GetExporters() map[component.DataType]map[component.I
 	return exportersMap
 }
 
-func (bps *builtPipelines) HandleZPages(w http.ResponseWriter, r *http.Request) {
-	qValues := r.URL.Query()
-	pipelineName := qValues.Get(zPipelineName)
-	componentName := qValues.Get(zComponentName)
-	componentKind := qValues.Get(zComponentKind)
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	zpages.WriteHTMLPageHeader(w, zpages.HeaderData{Title: "builtPipelines"})
-	zpages.WriteHTMLPipelinesSummaryTable(w, bps.getPipelinesSummaryTableData())
-	if pipelineName != "" && componentName != "" && componentKind != "" {
-		fullName := componentName
-		if componentKind == "processor" {
-			fullName = pipelineName + "/" + componentName
-		}
-		zpages.WriteHTMLComponentHeader(w, zpages.ComponentHeaderData{
-			Name: componentKind + ": " + fullName,
-		})
-		// TODO: Add config + status info.
-	}
-	zpages.WriteHTMLPageFooter(w)
-}
-
 // pipelinesSettings holds configuration for building builtPipelines.
 type pipelinesSettings struct {
 	Telemetry component.TelemetrySettings
 	BuildInfo component.BuildInfo
 
-	Receivers  *receiver.Builder
-	Processors *processor.Builder
-	Exporters  *exporter.Builder
+	ReceiverBuilder  *receiver.Builder
+	ProcessorBuilder *processor.Builder
+	ExporterBuilder  *exporter.Builder
+	ConnectorBuilder *connector.Builder
 
 	// PipelineConfigs is a map of component.ID to PipelineConfig.
 	PipelineConfigs map[component.ID]*PipelineConfig
 }
 
 // buildPipelines builds all pipelines from config.
-func buildPipelines(ctx context.Context, set pipelinesSettings) (*builtPipelines, error) {
+func buildPipelines(ctx context.Context, set pipelinesSettings) (pipelines, error) {
 	exps := &builtPipelines{
 		telemetry:    set.Telemetry,
 		allReceivers: make(map[component.DataType]map[component.ID]component.Component),
@@ -229,13 +215,7 @@ func buildPipelines(ctx context.Context, set pipelinesSettings) (*builtPipelines
 				continue
 			}
 
-			cSet := exporter.CreateSettings{
-				ID:                expID,
-				TelemetrySettings: set.Telemetry,
-				BuildInfo:         set.BuildInfo,
-			}
-			cSet.TelemetrySettings.Logger = exporterLogger(set.Telemetry.Logger, expID, pipelineID.Type())
-			exp, err := buildExporter(ctx, cSet, set.Exporters, pipelineID)
+			exp, err := buildExporter(ctx, expID, set.Telemetry, set.BuildInfo, set.ExporterBuilder, pipelineID)
 			if err != nil {
 				return nil, err
 			}
@@ -262,14 +242,7 @@ func buildPipelines(ctx context.Context, set pipelinesSettings) (*builtPipelines
 		// consumer for the one that precedes it in the pipeline and so on.
 		for i := len(pipeline.Processors) - 1; i >= 0; i-- {
 			procID := pipeline.Processors[i]
-
-			cSet := processor.CreateSettings{
-				ID:                procID,
-				TelemetrySettings: set.Telemetry,
-				BuildInfo:         set.BuildInfo,
-			}
-			cSet.TelemetrySettings.Logger = processorLogger(set.Telemetry.Logger, procID, pipelineID)
-			proc, err := buildProcessor(ctx, cSet, set.Processors, pipelineID, bp.lastConsumer)
+			proc, err := buildProcessor(ctx, procID, set.Telemetry, set.BuildInfo, set.ProcessorBuilder, pipelineID, bp.lastConsumer)
 			if err != nil {
 				return nil, err
 			}
@@ -320,13 +293,7 @@ func buildPipelines(ctx context.Context, set pipelinesSettings) (*builtPipelines
 				continue
 			}
 
-			cSet := receiver.CreateSettings{
-				ID:                recvID,
-				TelemetrySettings: set.Telemetry,
-				BuildInfo:         set.BuildInfo,
-			}
-			cSet.TelemetrySettings.Logger = receiverLogger(set.Telemetry.Logger, recvID, pipelineID.Type())
-			recv, err := buildReceiver(ctx, cSet, set.Receivers, pipelineID, receiversConsumers[pipelineID.Type()][recvID])
+			recv, err := buildReceiver(ctx, recvID, set.Telemetry, set.BuildInfo, set.ReceiverBuilder, pipelineID, receiversConsumers[pipelineID.Type()][recvID])
 			if err != nil {
 				return nil, err
 			}
@@ -336,28 +303,6 @@ func buildPipelines(ctx context.Context, set pipelinesSettings) (*builtPipelines
 		}
 	}
 	return exps, nil
-}
-
-func buildExporter(
-	ctx context.Context,
-	set exporter.CreateSettings,
-	builder *exporter.Builder,
-	pipelineID component.ID,
-) (exp component.Component, err error) {
-	switch pipelineID.Type() {
-	case component.DataTypeTraces:
-		exp, err = builder.CreateTraces(ctx, set)
-	case component.DataTypeMetrics:
-		exp, err = builder.CreateMetrics(ctx, set)
-	case component.DataTypeLogs:
-		exp, err = builder.CreateLogs(ctx, set)
-	default:
-		return nil, fmt.Errorf("error creating exporter %q in pipeline %q, data type %q is not supported", set.ID, pipelineID, pipelineID.Type())
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to create %q exporter, in pipeline %q: %w", set.ID, pipelineID, err)
-	}
-	return exp, nil
 }
 
 func buildFanOutExportersTracesConsumer(exporters []builtComponent) consumer.Traces {
@@ -387,19 +332,42 @@ func buildFanOutExportersLogsConsumer(exporters []builtComponent) consumer.Logs 
 	return fanoutconsumer.NewLogs(consumers)
 }
 
-func exporterLogger(logger *zap.Logger, id component.ID, dt component.DataType) *zap.Logger {
-	return logger.With(
-		zap.String(components.ZapKindKey, components.ZapKindExporter),
-		zap.String(components.ZapDataTypeKey, string(dt)),
-		zap.String(components.ZapNameKey, id.String()))
+func buildExporter(
+	ctx context.Context,
+	componentID component.ID,
+	tel component.TelemetrySettings,
+	info component.BuildInfo,
+	builder *exporter.Builder,
+	pipelineID component.ID,
+) (exp component.Component, err error) {
+	set := exporter.CreateSettings{ID: componentID, TelemetrySettings: tel, BuildInfo: info}
+	set.TelemetrySettings.Logger = components.ExporterLogger(set.TelemetrySettings.Logger, componentID, pipelineID.Type())
+	switch pipelineID.Type() {
+	case component.DataTypeTraces:
+		exp, err = builder.CreateTraces(ctx, set)
+	case component.DataTypeMetrics:
+		exp, err = builder.CreateMetrics(ctx, set)
+	case component.DataTypeLogs:
+		exp, err = builder.CreateLogs(ctx, set)
+	default:
+		return nil, fmt.Errorf("error creating exporter %q in pipeline %q, data type %q is not supported", set.ID, pipelineID, pipelineID.Type())
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to create %q exporter, in pipeline %q: %w", set.ID, pipelineID, err)
+	}
+	return exp, nil
 }
 
 func buildProcessor(ctx context.Context,
-	set processor.CreateSettings,
+	componentID component.ID,
+	tel component.TelemetrySettings,
+	info component.BuildInfo,
 	builder *processor.Builder,
 	pipelineID component.ID,
 	next baseConsumer,
 ) (proc component.Component, err error) {
+	set := processor.CreateSettings{ID: componentID, TelemetrySettings: tel, BuildInfo: info}
+	set.TelemetrySettings.Logger = components.ProcessorLogger(set.TelemetrySettings.Logger, componentID, pipelineID)
 	switch pipelineID.Type() {
 	case component.DataTypeTraces:
 		proc, err = builder.CreateTraces(ctx, set, next.(consumer.Traces))
@@ -416,19 +384,16 @@ func buildProcessor(ctx context.Context,
 	return proc, nil
 }
 
-func processorLogger(logger *zap.Logger, procID component.ID, pipelineID component.ID) *zap.Logger {
-	return logger.With(
-		zap.String(components.ZapKindKey, components.ZapKindProcessor),
-		zap.String(components.ZapNameKey, procID.String()),
-		zap.String(components.ZapKindPipeline, pipelineID.String()))
-}
-
 func buildReceiver(ctx context.Context,
-	set receiver.CreateSettings,
+	componentID component.ID,
+	tel component.TelemetrySettings,
+	info component.BuildInfo,
 	builder *receiver.Builder,
 	pipelineID component.ID,
 	nexts []baseConsumer,
 ) (recv component.Component, err error) {
+	set := receiver.CreateSettings{ID: componentID, TelemetrySettings: tel, BuildInfo: info}
+	set.TelemetrySettings.Logger = components.ReceiverLogger(tel.Logger, componentID, pipelineID.Type())
 	switch pipelineID.Type() {
 	case component.DataTypeTraces:
 		var consumers []consumer.Traces
@@ -457,43 +422,34 @@ func buildReceiver(ctx context.Context,
 	return recv, nil
 }
 
-func receiverLogger(logger *zap.Logger, id component.ID, dt component.DataType) *zap.Logger {
-	return logger.With(
-		zap.String(components.ZapKindKey, components.ZapKindReceiver),
-		zap.String(components.ZapNameKey, id.String()),
-		zap.String(components.ZapKindPipeline, string(dt)))
+func (bps *builtPipelines) HandleZPages(w http.ResponseWriter, r *http.Request) {
+	handleZPages(w, r, bps.pipelines)
 }
 
-func (bps *builtPipelines) getPipelinesSummaryTableData() zpages.SummaryPipelinesTableData {
-	sumData := zpages.SummaryPipelinesTableData{}
-	sumData.Rows = make([]zpages.SummaryPipelinesTableRowData, 0, len(bps.pipelines))
-	for c, p := range bps.pipelines {
-		// TODO: Change the template to use ID.
-		var recvs []string
-		for _, bRecv := range p.receivers {
-			recvs = append(recvs, bRecv.id.String())
-		}
-		var procs []string
-		for _, bProc := range p.processors {
-			procs = append(procs, bProc.id.String())
-		}
-		var exps []string
-		for _, bExp := range p.exporters {
-			exps = append(exps, bExp.id.String())
-		}
-		row := zpages.SummaryPipelinesTableRowData{
-			FullName:    c.String(),
-			InputType:   string(c.Type()),
-			MutatesData: p.lastConsumer.Capabilities().MutatesData,
-			Receivers:   recvs,
-			Processors:  procs,
-			Exporters:   exps,
-		}
-		sumData.Rows = append(sumData.Rows, row)
+func (bp *builtPipeline) receiverIDs() []string {
+	ids := make([]string, 0, len(bp.receivers))
+	for _, bc := range bp.receivers {
+		ids = append(ids, bc.id.String())
 	}
+	return ids
+}
 
-	sort.Slice(sumData.Rows, func(i, j int) bool {
-		return sumData.Rows[i].FullName < sumData.Rows[j].FullName
-	})
-	return sumData
+func (bp *builtPipeline) processorIDs() []string {
+	ids := make([]string, 0, len(bp.processors))
+	for _, bc := range bp.processors {
+		ids = append(ids, bc.id.String())
+	}
+	return ids
+}
+
+func (bp *builtPipeline) exporterIDs() []string {
+	ids := make([]string, 0, len(bp.exporters))
+	for _, bc := range bp.exporters {
+		ids = append(ids, bc.id.String())
+	}
+	return ids
+}
+
+func (bp *builtPipeline) mutatesData() bool {
+	return bp.lastConsumer.Capabilities().MutatesData
 }
