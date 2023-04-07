@@ -21,7 +21,7 @@ import (
 	"runtime"
 	"time"
 
-	arrowPkg "github.com/apache/arrow/go/v12/arrow"
+	arrowPkg "github.com/apache/arrow/go/v11/arrow"
 	"go.uber.org/multierr"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"

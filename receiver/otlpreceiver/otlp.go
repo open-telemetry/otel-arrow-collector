@@ -27,21 +27,21 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"go.opentelemetry.io/collector/internal/netstats"
-	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/arrow"
-	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/logs"
-	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/metrics"
-	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/trace"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/config/confighttp"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/extension/auth"
+	"go.opentelemetry.io/collector/internal/netstats"
 	"go.opentelemetry.io/collector/obsreport"
 	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
 	"go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp"
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
 	"go.opentelemetry.io/collector/receiver"
+	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/arrow"
+	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/logs"
+	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/metrics"
+	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/trace"
 )
 
 // otlpReceiver is the type that exposes Trace and Metrics reception.
