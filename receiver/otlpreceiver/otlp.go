@@ -27,6 +27,11 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	"go.opentelemetry.io/collector/internal/netstats"
+	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/arrow"
+	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/logs"
+	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/metrics"
+	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/trace"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/config/confighttp"
@@ -37,10 +42,6 @@ import (
 	"go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp"
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
 	"go.opentelemetry.io/collector/receiver"
-	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/arrow"
-	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/logs"
-	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/metrics"
-	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/trace"
 )
 
 // otlpReceiver is the type that exposes Trace and Metrics reception.
@@ -58,6 +59,7 @@ type otlpReceiver struct {
 
 	obsrepGRPC *obsreport.Receiver
 	obsrepHTTP *obsreport.Receiver
+	netStats   *netstats.NetworkReporter
 
 	settings receiver.CreateSettings
 }
@@ -66,15 +68,19 @@ type otlpReceiver struct {
 // responsibility to invoke the respective Start*Reception methods as well
 // as the various Stop*Reception methods to end it.
 func newOtlpReceiver(cfg *Config, set receiver.CreateSettings) (*otlpReceiver, error) {
+	netStats, err := netstats.NewReceiverNetworkReporter(set)
+	if err != nil {
+		return nil, err
+	}
 	r := &otlpReceiver{
 		cfg:      cfg,
 		settings: set,
+		netStats: netStats,
 	}
 	if cfg.HTTP != nil {
 		r.httpMux = http.NewServeMux()
 	}
 
-	var err error
 	r.obsrepGRPC, err = obsreport.NewReceiver(obsreport.ReceiverSettings{
 		ReceiverID:             set.ID,
 		Transport:              "grpc",
@@ -134,7 +140,12 @@ func (r *otlpReceiver) startHTTPServer(cfg *confighttp.HTTPServerSettings, host 
 func (r *otlpReceiver) startProtocolServers(host component.Host) error {
 	var err error
 	if r.cfg.GRPC != nil {
-		r.serverGRPC, err = r.cfg.GRPC.ToServer(host, r.settings.TelemetrySettings)
+		var serverOpts []grpc.ServerOption
+
+		if r.netStats != nil {
+			serverOpts = append(serverOpts, grpc.StatsHandler(r.netStats))
+		}
+		r.serverGRPC, err = r.cfg.GRPC.ToServer(host, r.settings.TelemetrySettings, serverOpts...)
 		if err != nil {
 			return err
 		}
@@ -160,12 +171,9 @@ func (r *otlpReceiver) startProtocolServers(host component.Host) error {
 				}
 			}
 
-			r.arrowReceiver, err = arrow.New(r.settings.ID, arrow.Consumers(r), r.settings, r.cfg.GRPC, authServer, func() arrowRecord.ConsumerAPI {
+			r.arrowReceiver = arrow.New(arrow.Consumers(r), r.settings, r.obsrepGRPC, r.cfg.GRPC, authServer, func() arrowRecord.ConsumerAPI {
 				return arrowRecord.NewConsumer()
 			})
-			if err != nil {
-				return err
-			}
 			arrowpb.RegisterArrowStreamServiceServer(r.serverGRPC, r.arrowReceiver)
 		}
 
