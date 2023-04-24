@@ -240,12 +240,11 @@ func (r *Receiver) logStreamError(err error) {
 	isEOF := errors.Is(err, io.EOF)
 	isCanceled := errors.Is(err, context.Canceled)
 
-	switch {
-	case !isEOF && !isCanceled:
+	if !isEOF && !isCanceled {
 		r.telemetry.Logger.Error("arrow stream error", zap.Error(err))
-	case isEOF:
+	} else if isEOF {
 		r.telemetry.Logger.Debug("arrow stream end")
-	default:
+	} else {
 		r.telemetry.Logger.Debug("arrow stream canceled")
 	}
 }

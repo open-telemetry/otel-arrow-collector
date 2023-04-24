@@ -116,7 +116,7 @@ func (s *Stream) logStreamError(err error) {
 		s.telemetry.Logger.Error("arrow stream error", zap.Error(err))
 	case isEOF:
 		s.telemetry.Logger.Debug("arrow stream end")
-	default:
+	case isCanceled:
 		s.telemetry.Logger.Debug("arrow stream canceled")
 	}
 }
