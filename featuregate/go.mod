@@ -1,10 +1,10 @@
 module go.opentelemetry.io/collector/featuregate
 
-go 1.18
+go 1.19
 
 require (
-	github.com/stretchr/testify v1.8.1
-	go.uber.org/atomic v1.10.0
+	github.com/stretchr/testify v1.8.2
+	go.uber.org/multierr v1.11.0
 )
 
 require (

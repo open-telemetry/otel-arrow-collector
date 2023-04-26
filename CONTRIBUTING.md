@@ -41,7 +41,7 @@ reasonably fast reviews.
 
 ### When adding a new component
 
-Components comprise of exporters, extensions, receivers, and processors. The key criteria to implementing a component is to:
+Components refer to connectors, exporters, extensions, processors, and receivers. The key criteria to implementing a component is to:
 
 * Implement the `component.Component` interface
 * Provide a configuration structure which defines the configuration of the component
@@ -49,20 +49,22 @@ Components comprise of exporters, extensions, receivers, and processors. The key
 
 For more details on components, see the [Adding New Components](https://github.com/open-telemetry/opentelemetry-collector-contrib/blob/main/CONTRIBUTING.md#adding-new-components) document and the tutorial [Building a Trace Receiver](https://opentelemetry.io/docs/collector/trace-receiver/) which provides a detailed example of building a component.
 
+When adding a new component to the OpenTelemetry Collector, ensure that any configuration structs used by the component include fields with the `configopaque.String` type for sensitive data. This ensures that the data is masked when serialized to prevent accidental exposure.
+
 When submitting a component to the community, consider breaking it down into separate PRs as follows:
 
-* First PR should include the overall structure of the new component:
+* **First PR** should include the overall structure of the new component:
   * Readme, configuration, and factory implementation usually using the helper
     factory structs.
   * This PR is usually trivial to review, so the size limit does not apply to
     it.
-* Second PR should include the concrete implementation of the component. If the
+  * The component should use [`In Development` Stability](https://github.com/open-telemetry/opentelemetry-collector#development) in its README.
+* **Second PR** should include the concrete implementation of the component. If the
   size of this PR is larger than the recommended size consider splitting it in
   multiple PRs.
-* Last PR should enable the new component and add it to the `otelcontribcol`
-  binary by updating the `components.go` file. The component must be enabled
-  only after sufficient testing, and there is enough confidence in the
-  stability and quality of the component.
+* **Last PR** should mark the new component as `Alpha` stability and add it to the `otelcorecol`
+  binary by updating the `otelcorecol/components.go` file. The component must be enabled
+  only after sufficient testing and only when it meets [`Alpha` stability requirements.](https://github.com/open-telemetry/opentelemetry-collector#alpha)
 * Once a new component has been added to the executable, please add the component
   to the [OpenTelemetry.io registry](https://github.com/open-telemetry/opentelemetry.io#adding-a-project-to-the-opentelemetry-registry).
 * intra-repository `replace` statements in `go.mod` files can be automatically inserted by running `make crosslink`. For more information
@@ -242,7 +244,14 @@ To keep naming patterns consistent across the project, naming patterns are enfor
 - Variable assigned in a package's global scope that is preconfigured with a default set of values MUST use `Default` as the prefix. For example:
   - `var DefaultMarshallers = map[string]pdata.Marshallers{...}` is defined with an exporters package that allows for converting an encoding name,
     `zipkin`, and return the preconfigured marshaller to be used in the export process.
-
+- Types that are specific to a signal MUST be worded with the signal used as an adjective, i.e. `SignalType`. For example:
+  - `type TracesSink interface {...}`
+- Types that deal with multiple signal types should use the relationship between the signals to describe the type, e.g. `SignalToSignalType` or `SignalAndSignalType`. For example:
+  - `type TracesToTracesFunc func(...) ...`
+- Functions dealing with specific signals or signal-specific types MUST be worded with the signal or type as a direct object, i.e. `VerbSignal`, or `VerbType` where `Type` is the full name of the type including the signal name. For example:
+  - `func ConsumeTraces(...) {...}`
+  - `func CreateTracesExport(...) {...}`
+  - `func CreateTracesToTracesFunc(...) {...}`
 
 ### Recommended Libraries / Defaults
 
@@ -448,13 +457,13 @@ func DoFoo() {}
 
 When deprecating a feature affecting end-users, consider first deprecating the feature in one version, then hiding it
 behind a [feature
-flag](https://github.com/open-telemetry/opentelemetry-collector/blob/6b5a3d08a96bfb41a5e121b34f592a1d5c6e0435/service/featuregate/)
+gate](https://github.com/open-telemetry/opentelemetry-collector/blob/6b5a3d08a96bfb41a5e121b34f592a1d5c6e0435/service/featuregate/)
 in a subsequent version, and eventually removing it after yet another version. This is how it would look like, considering
 that each of the following steps is done in a separate version:
 
-1. Mark the feature as deprecated, add a short lived feature flag with the feature enabled by default
-1. Change the feature flag to disable the feature by default, deprecating the flag at the same time
-1. Remove the feature and the flag
+1. Mark the feature as deprecated, add a short lived feature gate with the feature enabled by default
+1. Change the feature gate to disable the feature by default, deprecating the gate at the same time
+1. Remove the feature and the gate
 
 #### Example #1 - Renaming a function
 

@@ -19,8 +19,8 @@ import (
 	"errors"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
-	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"go.opentelemetry.io/collector/extension/experimental/storage"
@@ -90,7 +90,6 @@ var (
 
 // newPersistentContiguousStorage creates a new file-storage extension backed queue;
 // queueName parameter must be a unique value that identifies the queue.
-// The queue needs to be initialized separately using initPersistentContiguousStorage.
 func newPersistentContiguousStorage(ctx context.Context, queueName string, capacity uint64, logger *zap.Logger, client storage.Client, unmarshaler RequestUnmarshaler) *persistentContiguousStorage {
 	pcs := &persistentContiguousStorage{
 		logger:      logger,
@@ -101,23 +100,23 @@ func newPersistentContiguousStorage(ctx context.Context, queueName string, capac
 		putChan:     make(chan struct{}, capacity),
 		reqChan:     make(chan Request),
 		stopChan:    make(chan struct{}),
-		itemsCount:  atomic.NewUint64(0),
+		itemsCount:  &atomic.Uint64{},
 	}
 
 	initPersistentContiguousStorage(ctx, pcs)
 	notDispatchedReqs := pcs.retrieveNotDispatchedReqs(context.Background())
 
-	// We start the loop first so in case there are more elements in the persistent storage than the capacity,
-	// it does not get blocked on initialization
-
-	go pcs.loop()
-
 	// Make sure the leftover requests are handled
 	pcs.enqueueNotDispatchedReqs(notDispatchedReqs)
-	// Make sure the communication channel is loaded up
-	for i := uint64(0); i < pcs.size(); i++ {
+
+	// Ensure the communication channel has the same size as the queue
+	// We might already have items here from requeueing non-dispatched requests
+	for len(pcs.putChan) < int(pcs.size()) {
 		pcs.putChan <- struct{}{}
 	}
+
+	// start the loop which moves items from storage to the outbound channel
+	go pcs.loop()
 
 	return pcs
 }

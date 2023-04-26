@@ -32,14 +32,14 @@
 // receiving protocol allows to do that. In case of OTLP/HTTP for example, this means
 // that HTTP 400 response is returned to the sender.
 //
-// If the error is non-Permanent then the nextConsumer.Consume*() call may be retried
+// If the error is non-Permanent then the nextConsumer.Consume*() call should be retried
 // with the same data. This may be done by the receiver itself, however typically it is
 // done by the original sender, after the receiver returns a response to the sender
 // indicating that the Collector is currently overloaded and the request must be
 // retried. In case of OTLP/HTTP for example, this means that HTTP 429 or 503 response
 // is returned.
 //
-// # Acknowledgment Handling
+// # Acknowledgment and Checkpointing
 //
 // The receivers that receive data via a network protocol that support acknowledgments
 // MUST follow this order of operations:
@@ -50,4 +50,8 @@
 //
 // This ensures there are strong delivery guarantees once the data is acknowledged
 // by the Collector.
+//
+// Similarly, receivers that use checkpointing to remember the position of last processed
+// data (e.g. via storage extension) MUST store the checkpoint only AFTER the Consume*()
+// call returns.
 package receiver // import "go.opentelemetry.io/collector/receiver"

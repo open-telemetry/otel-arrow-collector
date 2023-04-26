@@ -47,7 +47,7 @@ It is possible that a core approver isn't a contrib approver. In that case, the 
 
 3. Tag all the module groups (`contrib-base`) with the new release version by running the `make push-tags MODSET=contrib-base` command. Wait for the new tag build to pass successfully.
 
-4. A new `v0.55.0` release should be automatically created on Github by now. Edit it and use the contents from the CHANGELOG.md as the release's description. At the top of the description add a link to Core release notes (assuming the previous release of Core and Contrib was also performed simultaneously), e.g. "The OpenTelemetry Collector Contrib contains everything in the [opentelemetry-collector release](https://github.com/open-telemetry/opentelemetry-collector/releases/tag/v0.55.0) (be sure to check the release notes here as well!)."
+4. A new `v0.55.0` release should be automatically created on Github by now. Edit it and use the contents from the CHANGELOG.md as the release's description.
 
 ## Producing the artifacts
 
@@ -93,7 +93,9 @@ When considering making a bugfix release on the `v0.N.x` release cycle, the bug 
     - The bug produces significant data loss
     - The bug makes the Collector negatively affect its environment (e.g. significantly affects its host machine)
 
-The OpenTelemetry Collector maintainers will ultimately have the responsibility to assess if a given bug fulfills all the necessary criteria and may grant exceptions in a case-by-case basis.
+We aim to provide a release that fixes security-related issues in at most 30 days since they are publicly announced; with the current release schedule this means security issues will typically not warrant a bugfix release. An exception is critical vulnerabilities (CVSSv3 score >= 9.0), which will warrant a release within five business days.
+
+The OpenTelemetry Collector maintainers will ultimately have the responsibility to assess if a given bug or security issue fulfills all the necessary criteria and may grant exceptions in a case-by-case basis.
 
 ### Bugfix release procedure
 
@@ -112,10 +114,10 @@ The following documents the procedure to release a bugfix
 
 | Date       | Version | Release manager |
 |------------|---------|-----------------|
-| 2023-02-06 | v0.71.0 | @codeboten      |
-| 2023-02-20 | v0.72.0 | @bogdandrutu    |
-| 2023-03-06 | v0.73.0 | @jpkrohling     |
-| 2023-03-20 | v0.74.0 | @Aneurysm9      |
-| 2023-04-03 | v0.75.0 | @mx-psi         |
-| 2023-04-17 | v0.76.0 | @djaglowski     |
-| 2023-05-01 | v0.77.0 | @dmitryax       |
+| 2023-04-24 | v0.76.0 | @djaglowski     |
+| 2023-05-08 | v0.77.0 | @dmitryax       |
+| 2023-05-22 | v0.78.0 | @bogdandrutu    |
+| 2023-06-05 | v0.79.0 | @codeboten      |
+| 2023-06-19 | v0.80.0 | @Aneurysm9      |
+| 2023-07-03 | v0.81.0 | @jpkrohling     |
+| 2023-07-17 | v0.82.0 | @mx-psi         |

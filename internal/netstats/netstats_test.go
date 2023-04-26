@@ -90,7 +90,8 @@ func testNetStatsExporter(t *testing.T, level configtelemetry.Level, expect map[
 			WireLength: 1,
 		})
 	}
-	rm, err := rdr.Collect(ctx)
+	var rm metricdata.ResourceMetrics
+	err = rdr.Collect(ctx, &rm)
 	require.NoError(t, err)
 
 	require.Equal(t, expect, metricValues(rm))
@@ -143,7 +144,8 @@ func testNetStatsReceiver(t *testing.T, level configtelemetry.Level, expect map[
 			WireLength: 1,
 		})
 	}
-	rm, err := rdr.Collect(ctx)
+	var rm metricdata.ResourceMetrics
+	err = rdr.Collect(ctx, &rm)
 	require.NoError(t, err)
 
 	require.Equal(t, expect, metricValues(rm))
