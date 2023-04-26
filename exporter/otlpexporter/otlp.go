@@ -21,7 +21,7 @@ import (
 	"runtime"
 	"time"
 
-	arrowPkg "github.com/apache/arrow/go/v11/arrow"
+	arrowPkg "github.com/apache/arrow/go/v12/arrow"
 	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
 	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 	"go.uber.org/multierr"
@@ -37,6 +37,7 @@ import (
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
 	"go.opentelemetry.io/collector/exporter/otlpexporter/internal/arrow"
+	"go.opentelemetry.io/collector/internal/netstats"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -57,6 +58,7 @@ type baseExporter struct {
 	metadata       metadata.MD
 	callOptions    []grpc.CallOption
 	settings       exporter.CreateSettings
+	netStats       *netstats.NetworkReporter
 
 	// Default user-agent header.
 	userAgent string
@@ -74,6 +76,10 @@ func newExporter(cfg component.Config, set exporter.CreateSettings) (*baseExport
 		return nil, errors.New("OTLP exporter config requires an Endpoint")
 	}
 
+	netStats, err := netstats.NewExporterNetworkReporter(set)
+	if err != nil {
+		return nil, err
+	}
 	userAgent := fmt.Sprintf("%s/%s (%s/%s)",
 		set.BuildInfo.Description, set.BuildInfo.Version, runtime.GOOS, runtime.GOARCH)
 
@@ -81,13 +87,19 @@ func newExporter(cfg component.Config, set exporter.CreateSettings) (*baseExport
 		userAgent += fmt.Sprintf(" ApacheArrow/%s (NumStreams/%d)", arrowPkg.PkgVersion, oCfg.Arrow.NumStreams)
 	}
 
-	return &baseExporter{config: oCfg, settings: set, userAgent: userAgent}, nil
+	return &baseExporter{config: oCfg, settings: set, userAgent: userAgent, netStats: netStats}, nil
 }
 
 // start actually creates the gRPC connection. The client construction is deferred till this point as this
 // is the only place we get hold of Extensions which are required to construct auth round tripper.
 func (e *baseExporter) start(ctx context.Context, host component.Host) (err error) {
-	if e.clientConn, err = e.config.GRPCClientSettings.ToClientConn(ctx, host, e.settings.TelemetrySettings, grpc.WithUserAgent(e.userAgent)); err != nil {
+	dialOpts := []grpc.DialOption{
+		grpc.WithUserAgent(e.userAgent),
+	}
+	if e.netStats != nil {
+		dialOpts = append(dialOpts, grpc.WithStatsHandler(e.netStats))
+	}
+	if e.clientConn, err = e.config.GRPCClientSettings.ToClientConn(ctx, host, e.settings.TelemetrySettings, dialOpts...); err != nil {
 		return err
 	}
 	e.traceExporter = ptraceotlp.NewGRPCClient(e.clientConn)

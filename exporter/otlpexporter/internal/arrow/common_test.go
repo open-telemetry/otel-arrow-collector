@@ -70,7 +70,7 @@ func newTestTelemetry(t *testing.T, noisy noisyTest) (component.TelemetrySetting
 	if noisy {
 		return telset, nil
 	}
-	core, obslogs := observer.New(zapcore.DebugLevel)
+	core, obslogs := observer.New(zapcore.InfoLevel)
 	telset.Logger = zap.New(zapcore.NewTee(core, zaptest.NewLogger(t).Core()))
 	return telset, obslogs
 }

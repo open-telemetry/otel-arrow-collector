@@ -3,7 +3,7 @@ module go.opentelemetry.io/collector/exporter/otlpexporter
 go 1.18
 
 require (
-	github.com/apache/arrow/go/v11 v11.0.0
+	github.com/apache/arrow/go/v12 v12.0.0-20230424155504-5de56928e0fe
 	github.com/f5/otel-arrow-adapter v0.0.0-20230217204850-fec5f16b6730
 	github.com/golang/mock v1.6.0
 	github.com/stretchr/testify v1.8.1
@@ -15,7 +15,7 @@ require (
 	go.uber.org/atomic v1.10.0
 	go.uber.org/multierr v1.9.0
 	go.uber.org/zap v1.24.0
-	golang.org/x/net v0.5.0
+	golang.org/x/net v0.7.0
 	google.golang.org/genproto v0.0.0-20221202195650-67e5cbc046fd
 	google.golang.org/grpc v1.52.3
 	google.golang.org/protobuf v1.28.1
@@ -24,6 +24,7 @@ require (
 require (
 	cloud.google.com/go/compute v1.15.1 // indirect
 	github.com/andybalholm/brotli v1.0.4 // indirect
+	github.com/apache/arrow/go/v11 v11.0.0 // indirect
 	github.com/apache/thrift v0.16.0 // indirect
 	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.0 // indirect
@@ -59,10 +60,10 @@ require (
 	go.opentelemetry.io/otel v1.13.0 // indirect
 	go.opentelemetry.io/otel/metric v0.36.0 // indirect
 	go.opentelemetry.io/otel/trace v1.13.0 // indirect
-	golang.org/x/mod v0.6.0 // indirect
-	golang.org/x/sys v0.4.0 // indirect
-	golang.org/x/text v0.6.0 // indirect
-	golang.org/x/tools v0.2.0 // indirect
+	golang.org/x/mod v0.8.0 // indirect
+	golang.org/x/sys v0.5.0 // indirect
+	golang.org/x/text v0.7.0 // indirect
+	golang.org/x/tools v0.6.0 // indirect
 	golang.org/x/xerrors v0.0.0-20220609144429-65e65417b02f // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
