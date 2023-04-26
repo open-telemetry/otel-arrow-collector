@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,7 +32,6 @@ import (
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/atomic"
 	"go.uber.org/zap/zaptest"
 	"golang.org/x/net/http2/hpack"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
@@ -92,7 +92,7 @@ type mockTracesReceiver struct {
 }
 
 func (r *mockTracesReceiver) Export(ctx context.Context, req ptraceotlp.ExportRequest) (ptraceotlp.ExportResponse, error) {
-	r.requestCount.Inc()
+	r.requestCount.Add(int32(1))
 	td := req.Traces()
 	r.totalItems.Add(int32(td.SpanCount()))
 	r.mux.Lock()
@@ -128,8 +128,8 @@ func otlpTracesReceiverOnGRPCServer(ln net.Listener, useTLS bool) (*mockTracesRe
 		mockReceiver: mockReceiver{
 			srv:          grpc.NewServer(sopts...),
 			ln:           ln,
-			requestCount: atomic.NewInt32(0),
-			totalItems:   atomic.NewInt32(0),
+			requestCount: &atomic.Int32{},
+			totalItems:   &atomic.Int32{},
 		},
 	}
 
@@ -151,7 +151,7 @@ type mockLogsReceiver struct {
 }
 
 func (r *mockLogsReceiver) Export(ctx context.Context, req plogotlp.ExportRequest) (plogotlp.ExportResponse, error) {
-	r.requestCount.Inc()
+	r.requestCount.Add(int32(1))
 	ld := req.Logs()
 	r.totalItems.Add(int32(ld.LogRecordCount()))
 	r.mux.Lock()
@@ -171,8 +171,8 @@ func otlpLogsReceiverOnGRPCServer(ln net.Listener) *mockLogsReceiver {
 	rcv := &mockLogsReceiver{
 		mockReceiver: mockReceiver{
 			srv:          grpc.NewServer(),
-			requestCount: atomic.NewInt32(0),
-			totalItems:   atomic.NewInt32(0),
+			requestCount: &atomic.Int32{},
+			totalItems:   &atomic.Int32{},
 		},
 	}
 
@@ -193,7 +193,7 @@ type mockMetricsReceiver struct {
 
 func (r *mockMetricsReceiver) Export(ctx context.Context, req pmetricotlp.ExportRequest) (pmetricotlp.ExportResponse, error) {
 	md := req.Metrics()
-	r.requestCount.Inc()
+	r.requestCount.Add(int32(1))
 	r.totalItems.Add(int32(md.DataPointCount()))
 	r.mux.Lock()
 	defer r.mux.Unlock()
@@ -212,8 +212,8 @@ func otlpMetricsReceiverOnGRPCServer(ln net.Listener) *mockMetricsReceiver {
 	rcv := &mockMetricsReceiver{
 		mockReceiver: mockReceiver{
 			srv:          grpc.NewServer(),
-			requestCount: atomic.NewInt32(0),
-			totalItems:   atomic.NewInt32(0),
+			requestCount: &atomic.Int32{},
+			totalItems:   &atomic.Int32{},
 		},
 	}
 

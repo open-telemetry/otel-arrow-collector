@@ -28,7 +28,6 @@ import (
 	"go.opencensus.io/stats/view"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/instrument"
-	"go.opentelemetry.io/otel/metric/unit"
 	"go.uber.org/zap"
 
 	"go.opentelemetry.io/collector/component"
@@ -118,13 +117,9 @@ func TestTelemetryInit(t *testing.T) {
 			name:    "UseOpenTelemetryForInternalMetrics",
 			useOtel: true,
 			expectedMetrics: map[string]metricValue{
-				metricPrefix + ocPrefix + counterName: {
-					value: 13,
-					labels: map[string]string{
-						"service_name":        "otelcol",
-						"service_version":     "latest",
-						"service_instance_id": testInstanceID,
-					},
+				metricPrefix + ocPrefix + counterName + "_total": {
+					value:  13,
+					labels: map[string]string{},
 				},
 				metricPrefix + otelPrefix + counterName + "_total": {
 					value:  13,
@@ -165,7 +160,7 @@ func TestTelemetryInit(t *testing.T) {
 				view.Unregister(v)
 			}()
 
-			metrics := getMetricsFromPrometheus(t, tel.server.Handler)
+			metrics := getMetricsFromPrometheus(t, tel.servers[0].Handler)
 			require.Equal(t, len(tc.expectedMetrics), len(metrics))
 
 			for metricName, metricValue := range tc.expectedMetrics {
@@ -188,7 +183,7 @@ func TestTelemetryInit(t *testing.T) {
 
 func createTestMetrics(t *testing.T, mp metric.MeterProvider) *view.View {
 	// Creates a OTel Go counter
-	counter, err := mp.Meter("collector_test").Int64Counter(otelPrefix+counterName, instrument.WithUnit(unit.Milliseconds))
+	counter, err := mp.Meter("collector_test").Int64Counter(otelPrefix+counterName, instrument.WithUnit("ms"))
 	require.NoError(t, err)
 	counter.Add(context.Background(), 13)
 
@@ -212,7 +207,7 @@ func createTestMetrics(t *testing.T, mp metric.MeterProvider) *view.View {
 }
 
 func getMetricsFromPrometheus(t *testing.T, handler http.Handler) map[string]*io_prometheus_client.MetricFamily {
-	req, err := http.NewRequest("GET", "/metrics", nil)
+	req, err := http.NewRequest(http.MethodGet, "/metrics", nil)
 	require.NoError(t, err)
 
 	rr := httptest.NewRecorder()

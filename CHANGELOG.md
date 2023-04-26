@@ -4,6 +4,99 @@
 
 <!-- next version -->
 
+## v1.0.0-rc10/v0.76.0
+
+### 🛑 Breaking changes 🛑
+
+- `confmap`: Using an Invalid Scheme in a URI will throw an error. (#7504)
+
+### 🚩 Deprecations 🚩
+
+- `featuregate`: Deprecate Gate.RemovalVersion and WithRegisterRemovalVersion in favor of ToVersion. (#7043)
+
+### 💡 Enhancements 💡
+
+- `batchprocessor`: Support zero timeout. (#7508)
+  This allows the batchprocessor to limit request sizes without introducing delay in a pipeline, to act only as a splitter.
+- `service`: use the otel opencensus bridge when telemetry.useOtelForInternalMetrics is enabled (#7483)
+- `connector`: Mark 'service.connectors' featuregate as stable (#2336)
+- `featuregate`: Add a new Deprecated stage for feature gates, when features are abandoned. (#7043)
+- `loggingexporter`: Show more counters in not detailed verbosity (#7461)
+  The logging exporter now shows more counters when the verbosity is not detailed. The following numbers are added:
+  - Number of resource logs
+  - Number of resource spans
+  - Number of resource metrics
+  - Number of data points
+  
+- `configtls`: Reload mTLS ClientCA certificates on file change (#6524)
+- `confmap`: Add support for nested URIs. (#7117)
+- `featuregate`: Add concept of gate lifetime, [fromVersion, toVersion]. (#7043)
+
+### 🧰 Bug fixes 🧰
+
+- `obsreport`: fix issue where send_failed_requests counter was reporting an incorrect value. (#7456)
+
+## v1.0.0-rc9/v0.75.0
+
+### 🛑 Breaking changes 🛑
+
+- `featuregate`: Remove deprecated featuregate.FlagValue (#7401)
+
+### 💡 Enhancements 💡
+
+- `provider`: Added userfriendly error on incorrect type. (#7399)
+
+### 🧰 Bug fixes 🧰
+
+- `loggingexporter`: Fix display of bucket boundaries of exponential histograms to correctly reflect inclusive/exclusive bounds. (#7445)
+- `exporterhelper`: Fix a deadlock in persistent queue initialization (#7400)
+
+## v1.0.0-rc8/v0.74.0
+
+### 🛑 Breaking changes 🛑
+
+- `consumererror`: Remove deprecated funcs in consumererror (#7357)
+
+### 🚩 Deprecations 🚩
+
+- `featuregate`: Deprecate `FlagValue` in favor of `NewFlag`. (#7042)
+
+### 💡 Enhancements 💡
+
+- `service`: Enable connectors by default by moving service.connectors featuregate to beta (#7369)
+
+## v0.73.0/v1.0.0-rc7
+
+### 🛑 Breaking changes 🛑
+
+- `consumererror`: Remove `Get` prefix from methods returning failed signal data (#7048)
+- `service`: Feature gate `service.graph` is now stable and cannot be disabled. It will be removed in the next version. (#2336)
+
+### 💡 Enhancements 💡
+
+- `exporter`: split exporter into its own module (#7239)
+- `receiver`: split receiver into its own module (#7174)
+- `connectors`: Provide connectors with a mechanism to route data to specific pipelines (#7152)
+- `confmap`: Mark `confmap.expandEnabled` as stable (#7323)
+
+## v1.0.0-rc6/v0.72.0
+
+### 🛑 Breaking changes 🛑
+
+- `all`: Remove go 1.18 support, bump minimum to go 1.19 and add testing for 1.20 (#7151)
+- `pdata`: Remove deprecated `[Metrics|Traces|Logs]MoveTo` methods. (#7165)
+- `featuregate`: Remove deprecated funcs in featuregate. (#7173)
+
+### 💡 Enhancements 💡
+
+- `semconv`: Generated Semantic conventions 1.17 that now contains the `event` type. (#7170)
+- `semconv`: Generated Semantic conventions 1.18. (#7168)
+
+### 🧰 Bug fixes 🧰
+
+- `memorylimiterprocessor`: Fix incorrect parsing of cgroups when running Collector with host mount (#6826)
+- `confmap`: Clear list of old already closed closers. (#7215)
+
 ## v1.0.0-rc5/v0.71.0
 
 ### 🛑 Breaking changes 🛑
@@ -417,6 +510,13 @@ and hope to make a v1.0.0 release soon.
 - `config/configgrpc`: Provide better helpers for configgrpc, consistent with confighttp (#6441)
   - Deprecate `GRPCClientSettings.ToDialOptions` in favor of `GRPCClientSettings.ToClientConn`.
   - Deprecate `GRPCServerSettings.ToServerOption` in favor of `GRPCServerSettings.ToServer`.
+
+- `featuregates`: Removing Gates being configurable externally to the Registry (#6167)
+  - Deprecate `Gate.ID` in favour of `Registry.RegisterID`
+  - Deprecate `Gate.Enabled` in favour of `Gate.IsEnabled()`
+  - Deprecate `Gate.Description` in favour of `WithRegisterDescription` to be used with `Registry.RegisterID`
+  - Deprecate `Registry.Register` in favour of `Registry.RegisterID`
+  - Deprecate `Registry.MustRegister` in favour of `Registry.MustRegisterID`
 
 
 ### 💡 Enhancements 💡

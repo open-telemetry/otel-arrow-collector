@@ -18,8 +18,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
-
-	"go.uber.org/atomic"
+	"sync/atomic"
 )
 
 var globalRegistry = NewRegistry()
@@ -37,9 +36,6 @@ type Registry struct {
 func NewRegistry() *Registry {
 	return &Registry{}
 }
-
-// Deprecated: [v0.71.0] use RegisterOption.
-type RegistryOption = RegisterOption
 
 // RegisterOption allows to configure additional information about a Gate during registration.
 type RegisterOption interface {
@@ -66,32 +62,24 @@ func WithRegisterReferenceURL(url string) RegisterOption {
 	})
 }
 
-// WithRegisterRemovalVersion is used when the Gate is considered StageStable,
-// to inform users that referencing the gate is no longer needed.
-func WithRegisterRemovalVersion(version string) RegisterOption {
+// Deprecated: [v0.76.0] use WithRegisterToVersion.
+var WithRegisterRemovalVersion = WithRegisterToVersion
+
+// WithRegisterFromVersion is used to set the Gate "FromVersion".
+// The "FromVersion" contains the Collector release when a feature is introduced.
+func WithRegisterFromVersion(fromVersion string) RegisterOption {
 	return registerOptionFunc(func(g *Gate) {
-		g.removalVersion = version
+		g.fromVersion = fromVersion
 	})
 }
 
-// Deprecated: [v0.71.0] use Set.
-func (r *Registry) Apply(cfg map[string]bool) error {
-	for id, enabled := range cfg {
-		if err := r.Set(id, enabled); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// Deprecated: [v0.71.0] check the enable status on the returned Gate from Register or MustRegister.
-func (r *Registry) IsEnabled(id string) bool {
-	v, ok := r.gates.Load(id)
-	if !ok {
-		return false
-	}
-	g := v.(*Gate)
-	return g.IsEnabled()
+// WithRegisterToVersion is used to set the Gate "ToVersion".
+// The "ToVersion", if not empty, contains the last Collector release in which you can still use a feature gate.
+// If the feature stage is either "Deprecated" or "Stable", the "ToVersion" is the Collector release when the feature is removed.
+func WithRegisterToVersion(toVersion string) RegisterOption {
+	return registerOptionFunc(func(g *Gate) {
+		g.toVersion = toVersion
+	})
 }
 
 // MustRegister like Register but panics if an invalid ID or gate options are provided.
@@ -114,13 +102,15 @@ func (r *Registry) Register(id string, stage Stage, opts ...RegisterOption) (*Ga
 	}
 	switch g.stage {
 	case StageAlpha:
-		g.enabled = atomic.NewBool(false)
+		g.enabled = &atomic.Bool{}
 	case StageBeta, StageStable:
-		g.enabled = atomic.NewBool(true)
+		enabled := &atomic.Bool{}
+		enabled.Store(true)
+		g.enabled = enabled
 	default:
 		return nil, fmt.Errorf("unknown stage value %q for gate %q", stage, id)
 	}
-	if g.stage == StageStable && g.removalVersion == "" {
+	if g.stage == StageStable && g.toVersion == "" {
 		return nil, fmt.Errorf("no removal version set for stable gate %q", id)
 	}
 	if _, loaded := r.gates.LoadOrStore(id, g); loaded {
@@ -129,26 +119,15 @@ func (r *Registry) Register(id string, stage Stage, opts ...RegisterOption) (*Ga
 	return g, nil
 }
 
-// Deprecated: [v0.71.0] use MustRegister.
-func (r *Registry) MustRegisterID(id string, stage Stage, opts ...RegisterOption) {
-	r.MustRegister(id, stage, opts...)
-}
-
-// Deprecated: [v0.71.0] use Register.
-func (r *Registry) RegisterID(id string, stage Stage, opts ...RegisterOption) error {
-	_, err := r.Register(id, stage, opts...)
-	return err
-}
-
 // Set the enabled valued for a Gate identified by the given id.
 func (r *Registry) Set(id string, enabled bool) error {
 	v, ok := r.gates.Load(id)
 	if !ok {
-		return fmt.Errorf("no such feature gate -%v", id)
+		return fmt.Errorf("no such feature gate %q", id)
 	}
 	g := v.(*Gate)
 	if g.stage == StageStable {
-		return fmt.Errorf("feature gate %s is stable, can not be modified", id)
+		return fmt.Errorf("feature gate %q is stable, can not be modified", id)
 	}
 	g.enabled.Store(enabled)
 	return nil
@@ -167,13 +146,4 @@ func (r *Registry) VisitAll(fn func(*Gate)) {
 	for i := range gates {
 		fn(gates[i])
 	}
-}
-
-// Deprecated: [v0.71.0] use VisitAll.
-func (r *Registry) List() []Gate {
-	var ret []Gate
-	r.VisitAll(func(gate *Gate) {
-		ret = append(ret, *gate)
-	})
-	return ret
 }
