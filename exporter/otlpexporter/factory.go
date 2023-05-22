@@ -16,7 +16,10 @@ package otlpexporter // import "go.opentelemetry.io/collector/exporter/otlpexpor
 
 import (
 	"context"
+	"runtime"
 
+	arrowpb "github.com/f5/otel-arrow-adapter/api/experimental/arrow/v1"
+	"go.opentelemetry.io/collector/exporter/otlpexporter/internal/arrow"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configcompression"
 	"go.opentelemetry.io/collector/config/configgrpc"
@@ -24,6 +27,7 @@ import (
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
+	"google.golang.org/grpc"
 )
 
 const (
@@ -55,8 +59,7 @@ func createDefaultConfig() component.Config {
 			WriteBufferSize: 512 * 1024,
 		},
 		Arrow: ArrowSettings{
-			NumStreams: 1,
-			Enabled:    false,
+			NumStreams: runtime.NumCPU(),
 		},
 	}
 }
@@ -72,12 +75,19 @@ func (oce *baseExporter) helperOptions() []exporterhelper.Option {
 	}
 }
 
+func createArrowTracesStream(cfg *Config, conn *grpc.ClientConn) func(ctx context.Context, opts ...grpc.CallOption) (arrow.AnyStreamClient, error) {
+	if cfg.Arrow.EnableMixedSignals {
+		return arrow.MakeAnyStreamClient(arrowpb.NewArrowStreamServiceClient(conn).ArrowStream)
+	}
+	return arrow.MakeAnyStreamClient(arrowpb.NewArrowTracesServiceClient(conn).ArrowTraces)
+}
+
 func createTracesExporter(
 	ctx context.Context,
 	set exporter.CreateSettings,
 	cfg component.Config,
 ) (exporter.Traces, error) {
-	oce, err := newExporter(cfg, set)
+	oce, err := newExporter(cfg, set, createArrowTracesStream)
 	if err != nil {
 		return nil, err
 	}
@@ -87,12 +97,19 @@ func createTracesExporter(
 	)
 }
 
+func createArrowMetricsStream(cfg *Config, conn *grpc.ClientConn) func(ctx context.Context, opts ...grpc.CallOption) (arrow.AnyStreamClient, error) {
+	if cfg.Arrow.EnableMixedSignals {
+		return arrow.MakeAnyStreamClient(arrowpb.NewArrowStreamServiceClient(conn).ArrowStream)
+	}
+	return arrow.MakeAnyStreamClient(arrowpb.NewArrowMetricsServiceClient(conn).ArrowMetrics)
+}
+
 func createMetricsExporter(
 	ctx context.Context,
 	set exporter.CreateSettings,
 	cfg component.Config,
 ) (exporter.Metrics, error) {
-	oce, err := newExporter(cfg, set)
+	oce, err := newExporter(cfg, set, createArrowMetricsStream)
 	if err != nil {
 		return nil, err
 	}
@@ -102,12 +119,19 @@ func createMetricsExporter(
 	)
 }
 
+func createArrowLogsStream(cfg *Config, conn *grpc.ClientConn) func(ctx context.Context, opts ...grpc.CallOption) (arrow.AnyStreamClient, error) {
+	if cfg.Arrow.EnableMixedSignals {
+		return arrow.MakeAnyStreamClient(arrowpb.NewArrowStreamServiceClient(conn).ArrowStream)
+	}
+	return arrow.MakeAnyStreamClient(arrowpb.NewArrowLogsServiceClient(conn).ArrowLogs)
+}
+
 func createLogsExporter(
 	ctx context.Context,
 	set exporter.CreateSettings,
 	cfg component.Config,
 ) (exporter.Logs, error) {
-	oce, err := newExporter(cfg, set)
+	oce, err := newExporter(cfg, set, createArrowLogsStream)
 	if err != nil {
 		return nil, err
 	}
