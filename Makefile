@@ -89,7 +89,7 @@ gogenerate:
 
 .PHONY: addlicense
 addlicense: $(ADDLICENSE)
-	@ADDLICENSEOUT=`$(ADDLICENSE) -y "" -c "The OpenTelemetry Authors" $(ALL_SRC) 2>&1`; \
+	@ADDLICENSEOUT=`$(ADDLICENSE) -s=only -y "" -c "The OpenTelemetry Authors" $(ALL_SRC) 2>&1`; \
 		if [ "$$ADDLICENSEOUT" ]; then \
 			echo "$(ADDLICENSE) FAILED => add License errors:\n"; \
 			echo "$$ADDLICENSEOUT\n"; \
@@ -100,15 +100,14 @@ addlicense: $(ADDLICENSE)
 
 .PHONY: checklicense
 checklicense: $(ADDLICENSE)
-	@ADDLICENSEOUT=`$(ADDLICENSE) -check $(ALL_SRC) 2>&1`; \
-		if [ "$$ADDLICENSEOUT" ]; then \
-			echo "$(ADDLICENSE) FAILED => add License errors:\n"; \
-			echo "$$ADDLICENSEOUT\n"; \
-			echo "Use 'make addlicense' to fix this."; \
-			exit 1; \
-		else \
-			echo "Check License finished successfully"; \
-		fi
+	@licRes=$$(for f in $$(find . -type f \( -iname '*.go' -o -iname '*.sh' \) ! -path '**/third_party/*') ; do \
+	           awk '/Copyright The OpenTelemetry Authors|generated|GENERATED/ && NR<=3 { found=1; next } END { if (!found) print FILENAME }' $$f; \
+			   awk '/SPDX-License-Identifier: Apache-2.0|generated|GENERATED/ && NR<=4 { found=1; next } END { if (!found) print FILENAME }' $$f; \
+	   done); \
+	   if [ -n "$${licRes}" ]; then \
+	           echo "license header checking failed:"; echo "$${licRes}"; \
+	           exit 1; \
+	   fi
 
 .PHONY: misspell
 misspell: $(MISSPELL)
@@ -381,6 +380,40 @@ push-tags: $(MULTIMOD)
 		git push ${REMOTE} $${tag}; \
 	done;
 
+.PHONY: check-changes
+check-changes: $(YQ)
+ifndef MODSET
+	@echo "MODSET not defined"
+	@echo "usage: make check-changes PREVIOUS_VERSION=<version eg 0.52.0> MODSET=beta"
+	exit 1
+endif
+ifndef PREVIOUS_VERSION
+	@echo "PREVIOUS_VERSION not defined"
+	@echo "usage: make check-changes PREVIOUS_VERSION=<version eg 0.52.0> MODSET=beta"
+	exit 1
+endif
+	@all_submods=$$($(YQ) e '.module-sets.*.modules[] | select(. != "go.opentelemetry.io/collector")' versions.yaml | sed 's/^go\.opentelemetry\.io\/collector\///'); \
+	mods=$$($(YQ) e '.module-sets.$(MODSET).modules[]' versions.yaml | sed 's/^go\.opentelemetry\.io\/collector\///'); \
+	changed_files=""; \
+	for mod in $${mods}; do \
+		if [ "$${mod}" == "go.opentelemetry.io/collector" ]; then \
+			changed_files+=$$(git diff --name-only v$(PREVIOUS_VERSION) -- $$(printf '%s\n' $${all_submods[@]} | sed 's/^/:!/' | paste -sd' ' -) | grep -E '.+\.go$$'); \
+		elif ! git rev-parse --quiet --verify $${mod}/v$(PREVIOUS_VERSION) >/dev/null; then \
+			echo "Module $${mod} does not have a v$(PREVIOUS_VERSION) tag"; \
+			echo "$(MODSET) release is required."; \
+			exit 0; \
+		else \
+			changed_files+=$$(git diff --name-only $${mod}/v$(PREVIOUS_VERSION) -- $${mod} | grep -E '.+\.go$$'); \
+		fi; \
+	done; \
+	if [ -n "$${changed_files}" ]; then \
+		echo "The following files changed in $(MODSET) modules since v$(PREVIOUS_VERSION): $${changed_files}"; \
+	else \
+		echo "No $(MODSET) modules have changed since v$(PREVIOUS_VERSION)"; \
+		echo "No need to release $(MODSET)."; \
+		exit 1; \
+	fi
+
 .PHONY: prepare-release
 prepare-release:
 ifndef MODSET
@@ -404,6 +437,9 @@ else
 endif
 	# ensure a clean branch
 	git diff -s --exit-code || (echo "local repository not clean"; exit 1)
+	# check if any modules have changed since the previous release
+	$(MAKE) check-changes
+	# update files with new version
 	sed -i.bak 's/$(PREVIOUS_VERSION)/$(RELEASE_CANDIDATE)/g' versions.yaml
 	sed -i.bak 's/$(PREVIOUS_VERSION)/$(RELEASE_CANDIDATE)/g' ./cmd/builder/internal/builder/config.go
 	sed -i.bak 's/$(PREVIOUS_VERSION)/$(RELEASE_CANDIDATE)/g' ./cmd/builder/test/core.builder.yaml

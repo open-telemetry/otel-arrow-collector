@@ -1,22 +1,42 @@
 // Copyright The OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//	http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: Apache-2.0
 
 package plogotlp
 
 import (
 	"encoding/json"
+	"testing"
+
+	jsoniter "github.com/json-iterator/go"
+	"github.com/stretchr/testify/assert"
 )
 
 var _ json.Unmarshaler = ExportResponse{}
 var _ json.Marshaler = ExportResponse{}
+
+func TestExportResponseJSON(t *testing.T) {
+	jsonStr := `{"partialSuccess": {"rejectedLogRecords":1, "errorMessage":"nothing"}}`
+	val := NewExportResponse()
+	assert.NoError(t, val.UnmarshalJSON([]byte(jsonStr)))
+	expected := NewExportResponse()
+	expected.PartialSuccess().SetRejectedLogRecords(1)
+	expected.PartialSuccess().SetErrorMessage("nothing")
+	assert.Equal(t, expected, val)
+}
+
+func TestUnmarshalJSONExportResponse(t *testing.T) {
+	jsonStr := `{"extra":"", "partialSuccess": {}}`
+	val := NewExportResponse()
+	assert.NoError(t, val.UnmarshalJSON([]byte(jsonStr)))
+	assert.Equal(t, NewExportResponse(), val)
+}
+
+func TestUnmarshalJsoniterExportPartialSuccess(t *testing.T) {
+	jsonStr := `{"extra":""}`
+	iter := jsoniter.ConfigFastest.BorrowIterator([]byte(jsonStr))
+	defer jsoniter.ConfigFastest.ReturnIterator(iter)
+	val := NewExportPartialSuccess()
+	val.unmarshalJsoniter(iter)
+	assert.NoError(t, iter.Error)
+	assert.Equal(t, NewExportPartialSuccess(), val)
+}

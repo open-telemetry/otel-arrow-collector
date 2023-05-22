@@ -1,19 +1,28 @@
 #!/bin/bash -ex
+#
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
 
-EXISTING_ISSUE=$( gh issue list --search "Release v${CANDIDATE_BETA}/v${CANDIDATE_STABLE}" --json url --jq '.[].url' --repo "${REPO}" )
+RELEASE_VERSION=v${CANDIDATE_STABLE}/v${CANDIDATE_BETA}
+if [ "${CANDIDATE_STABLE}" == "" ]; then
+    RELEASE_VERSION="v${CANDIDATE_BETA}"
+fi
+if [ "${CANDIDATE_BETA}" == "" ]; then
+    RELEASE_VERSION="v${CANDIDATE_STABLE}"
+fi
+
+EXISTING_ISSUE=$( gh issue list --search "Release ${RELEASE_VERSION}" --json url --jq '.[].url' --repo "${REPO}" )
 
 if [ "${EXISTING_ISSUE}" != "" ]; then
     echo "Issue already exists: ${EXISTING_ISSUE}"
     exit 0
 fi
 
-gh issue create -a "${GITHUB_ACTOR}" --repo "${REPO}" --label release --title "Release v${CANDIDATE_BETA}/v${CANDIDATE_STABLE}" --body "Like #4522, but for v${CANDIDATE_BETA}/v${CANDIDATE_STABLE}
+gh issue create -a "${GITHUB_ACTOR}" --repo "${REPO}" --label release --title "Release ${RELEASE_VERSION}" --body "Like #4522, but for ${RELEASE_VERSION}
 **Performed by collector release manager**
 
-- [ ] Prepare stable core release v${CANDIDATE_STABLE}
-- [ ] Prepare beta core release v${CANDIDATE_BETA}
-- [ ] Tag and release stable core v${CANDIDATE_STABLE}
-- [ ] Tag and release beta core v${CANDIDATE_BETA}
+- [ ] Prepare core release ${RELEASE_VERSION}
+- [ ] Tag and release core ${RELEASE_VERSION}
 - [ ] Prepare contrib release v${CANDIDATE_BETA}
 - [ ] Tag and release contrib v${CANDIDATE_BETA}
 - [ ] Prepare otelcol-releases v${CANDIDATE_BETA}

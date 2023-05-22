@@ -1,16 +1,5 @@
 // Copyright The OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//       http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: Apache-2.0
 
 package telemetry // import "go.opentelemetry.io/collector/service/telemetry"
 
@@ -104,6 +93,19 @@ type LogsSamplingConfig struct {
 	Thereafter int `mapstructure:"thereafter"`
 }
 
+// MetricReader exposes configuration of metric readers to end users.
+// TODO: replace this temporary struct w/ auto-generated struct from jsonschema
+// https://github.com/open-telemetry/opentelemetry-configuration/tree/main/schema
+//
+// Experimental: *NOTE* this structure is subject to change or removal in the future.
+type MetricReader struct {
+	// Args corresponds to the JSON schema field "args".
+	Args any `mapstructure:"args"`
+
+	// Type corresponds to the JSON schema field "type".
+	Type string `mapstructure:"type"`
+}
+
 // MetricsConfig exposes the common Telemetry configuration for one component.
 // Experimental: *NOTE* this structure is subject to change or removal in the future.
 type MetricsConfig struct {
@@ -116,6 +118,10 @@ type MetricsConfig struct {
 
 	// Address is the [address]:port that metrics exposition should be bound to.
 	Address string `mapstructure:"address"`
+
+	// Readers allow configuration of metric readers to emit metrics to
+	// any number of supported backends.
+	Readers []MetricReader `mapstructure:"metric_readers"`
 }
 
 // TracesConfig exposes the common Telemetry configuration for collector's internal spans.
