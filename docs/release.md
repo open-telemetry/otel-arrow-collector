@@ -25,27 +25,36 @@ It is possible that a core approver isn't a contrib approver. In that case, the 
 
 ## Releasing opentelemetry-collector
 
-1. Determine the version number that will be assigned to the release. During the beta phase, we increment the minor version number and set the patch number to 0. In this document, we are using `v0.55.0` as the version to be released, following `v0.54.0`.
+1. Determine the version number that will be assigned to the release. During the beta phase, we increment the minor version number and set the patch number to 0. In this document, we are using `v0.55.0` as the version to be released, following `v0.54.0`. 
+   Check if stable modules have any changes since the last release by running `make check-changes PREVIOUS_VERSION=v1.0.0-rc9 MODSET=stable`. If there are no changes, there is no need to release new version for stable modules. 
 
-2. Run the action [Automation - Prepare Release](https://github.com/open-telemetry/opentelemetry-collector/actions/workflows/prepare-release.yml). This will create an issue to track the progress of the release and a pull request to update the changelog and version numbers in the repo.
+2. Manually run the action [Automation - Prepare Release](https://github.com/open-telemetry/opentelemetry-collector/actions/workflows/prepare-release.yml). When prompted, enter the version numbers determined in Step 1, but do not include `v`. This action will create an issue to track the progress of the release and a pull request to update the changelog and version numbers in the repo. **While this PR is open all merging in Core should be haulted**. **Do not** move forward until this PR is merged.
+   - If the PR needs updated in any way you can make the changes in a fork and PR those changes into the `prepare-release-prs/x` branch. You do not need to wait for the CI to pass in this prep-to-prep PR.
 
-3. Update Contrib to use the latest in development version of Core. Run `make update-otel` in Contrib root directory and if it results in any changes, submit a PR. Open this PR as draft. This is to ensure that the latest core does not break contrib in any way. We’ll update it once more to the final release number later.
+3. Update Contrib to use the latest in development version of Core. Run `make update-otel` in Contrib root directory and if it results in any changes submit a PR to Contrib with the changes as draft. This is to ensure that the latest core does not break contrib in any way. We’ll update it once more to the final release number later.
 
-4. Create a branch named `release/<release-series>` (e.g. `release/v0.45.x`) from the changelog update commit and push to `open-telemetry/opentelemetry-collector`.
+4. Create a branch named `release/<release-series>` (e.g. `release/v0.55.x`) from the `Prepare Release` commit and push to `open-telemetry/opentelemetry-collector`.
 
-5. Tag all the module groups (stable, beta) with the new release version by running the `make push-tags` command (e.g. `make push-tags MODSET=stable` and `make push-tags MODSET=beta`). Wait for the new tag build to pass successfully.
+5. Make sure you are on `release/<release-series>`. Tag the module groups with the new release version by running: 
+   - `make push-tags MODSET=beta` for beta modules group,
+   - `make push-tags MODSET=stable` beta stable modules group, only if there were changes since the last release.
+   
+   If you set your remote using `https` you need to include `REMOTE=https://github.com/open-telemetry/opentelemetry-collector.git` in each command. Wait for the new tag build to pass successfully.
 
 6. The release script for the collector builder should create a new GitHub release for the builder. This is a separate release from the core, but we might join them in the future if it makes sense.
 
 7. A new `v0.55.0` release should be automatically created on Github by now. Edit it and use the contents from the CHANGELOG.md as the release's description.
 
+8. If you created a draft PR to Contrib in step 3, update the PR to use the newly released Core version and set it to Ready for Review. **Do not** move forward until this PR is merged.  
+
 ## Releasing opentelemetry-collector-contrib
 
-1. Run the action [Automation - Prepare Release](https://github.com/open-telemetry/opentelemetry-collector-contrib/actions/workflows/prepare-release.yml). This will a pull request to update the changelog and version numbers in the repo.
+1. Manually run the action [Automation - Prepare Release](https://github.com/open-telemetry/opentelemetry-collector-contrib/actions/workflows/prepare-release.yml). When prompted, enter the version numbers determined in Step 1, but do not include `v`. This action will a pull request to update the changelog and version numbers in the repo. **While this PR is open all merging in Contrib should be haulted**. Do not move forward until this PR is merged.
+   - If the PR needs updated in any way you can make the changes in a fork and PR those changes into the `prepare-release-prs/x` branch. You do not need to wait for the CI to pass in this prep-to-prep PR.
 
-2. Create a branch named `release/<release-series>` (e.g. `release/v0.45.x`) in Contrib from the changelog update commit and push it to `open-telemetry/opentelemetry-collector-contrib`.
+2. Create a branch named `release/<release-series>` (e.g. `release/v0.55.x`) in Contrib from the changelog update commit and push it to `open-telemetry/opentelemetry-collector-contrib`.
 
-3. Tag all the module groups (`contrib-base`) with the new release version by running the `make push-tags MODSET=contrib-base` command. Wait for the new tag build to pass successfully.
+3. Make sure you are on `release/<release-series>`. Tag all the module groups (`contrib-base`) with the new release version by running the `make push-tags MODSET=contrib-base` command. If you set your remote using `https` you need to include `REMOTE=https://github.com/open-telemetry/opentelemetry-collector-contrib.git` in each command. Wait for the new tag build to pass successfully.
 
 4. A new `v0.55.0` release should be automatically created on Github by now. Edit it and use the contents from the CHANGELOG.md as the release's description.
 
@@ -55,23 +64,34 @@ The last step of the release process creates artifacts for the new version of th
 
 1. Update the `./distribution/**/manifest.yaml` files to include the new release version.
 
-1. Update the builder version in `OTELCOL_BUILDER_VERSION` to the new release in the `Makefile`. While this might not be strictly necessary for every release, this is a good practice.
+2. Update the builder version in `OTELCOL_BUILDER_VERSION` to the new release in the `Makefile`. While this might not be strictly necessary for every release, this is a good practice.
 
-1. Create a pull request with the change and ensure the build completes successfully. See [example](https://github.com/open-telemetry/opentelemetry-collector-releases/pull/71).
+3. Create a pull request with the change and ensure the build completes successfully. See [example](https://github.com/open-telemetry/opentelemetry-collector-releases/pull/71).
 
-1. Tag with the new release version by running the `make push-tags TAG=v0.55.0` command. Wait for the new tag build to pass successfully.
+4. Tag with the new release version by running the `make push-tags TAG=v0.55.0` command. If you set your remote using `https` you need to include `REMOTE=https://github.com/open-telemetry/opentelemetry-collector-releases.git` in each command. Wait for the new tag build to pass successfully.
 
-1. Ensure the "Release" action passes, this will
-
+5. Ensure the "Release" action passes, this will
+ 
     1. push new container images to https://hub.docker.com/repository/docker/otel/opentelemetry-collector
 
-    1. create a Github release for the tag and push all the build artifacts to the Github release. See [example](https://github.com/open-telemetry/opentelemetry-collector-releases/actions/runs/1346637081).
+    2. create a Github release for the tag and push all the build artifacts to the Github release. See [example](https://github.com/open-telemetry/opentelemetry-collector-releases/actions/runs/1346637081).
 
 ## Troubleshooting
 
 1. `unknown revision internal/coreinternal/v0.55.0` -- This is typically an indication that there's a dependency on a new module. You can fix it by adding a new `replaces` entry to the `go.mod` for the affected module.
 2. `commitChangesToNewBranch failed: invalid merge` -- This is a [known issue](https://github.com/open-telemetry/opentelemetry-go-build-tools/issues/47) with our release tooling. The current workaround is to clone a fresh copy of the repository and try again. Note that you may need to set up a `fork` remote pointing to your own fork for the release tooling to work properly.
 3. `could not run Go Mod Tidy: go mod tidy failed` when running `multimod` -- This is a [known issue](https://github.com/open-telemetry/opentelemetry-go-build-tools/issues/46) with our release tooling. The current workaround is to run `make gotidy` manually after the multimod tool fails and commit the result.
+4. `Incorrect version "X" of "go.opentelemetry.io/collector/component" is included in "X"` in CI after `make update-otel` -- It could be because the make target was run too soon after updating Core and the goproxy hasn't updated yet.  Try running `export GOPROXY=direct` and then `make update-otel`.
+5. `error: failed to push some refs to 'https://github.com/open-telemetry/opentelemetry-collector-contrib.git'` during `make push-tags` -- If you encounter this error the `make push-tags` target will terminate without pushing all the tags. Using the output of the `make push-tags` target, save all the un-pushed the tags in `tags.txt` and then use this make target to complete the push:
+
+   ```bash
+   .PHONY: temp-push-tags
+   temp-push-tags:
+       for tag in `cat tags.txt`; do \
+           echo "pushing tag $${tag}"; \
+           git push ${REMOTE} $${tag}; \
+       done;
+   ```
 
 ## Bugfix releases
 
@@ -114,10 +134,10 @@ The following documents the procedure to release a bugfix
 
 | Date       | Version | Release manager |
 |------------|---------|-----------------|
-| 2023-04-24 | v0.76.0 | @djaglowski     |
-| 2023-05-08 | v0.77.0 | @dmitryax       |
 | 2023-05-22 | v0.78.0 | @bogdandrutu    |
 | 2023-06-05 | v0.79.0 | @codeboten      |
 | 2023-06-19 | v0.80.0 | @Aneurysm9      |
 | 2023-07-03 | v0.81.0 | @jpkrohling     |
 | 2023-07-17 | v0.82.0 | @mx-psi         |
+| 2023-07-31 | v0.83.0 | @djaglowski     |
+| 2023-08-14 | v0.84.0 | @dmitryax       |

@@ -1,4 +1,7 @@
 #!/bin/bash -ex
+#
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
 
 git config user.name opentelemetrybot
 git config user.email 107717825+opentelemetrybot@users.noreply.github.com

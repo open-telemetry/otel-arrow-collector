@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
 
 # This script is used to create API state snapshots used to validate releases are not breaking backwards compatibility.
 

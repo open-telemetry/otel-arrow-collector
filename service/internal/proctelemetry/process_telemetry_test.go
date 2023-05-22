@@ -1,16 +1,5 @@
 // Copyright The OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//       http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: Apache-2.0
 
 package proctelemetry
 
@@ -32,7 +21,7 @@ import (
 	"go.opencensus.io/metric/metricdata"
 	"go.opencensus.io/stats/view"
 	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
-	otelmetric "go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/noop"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 
@@ -148,7 +137,7 @@ func TestOtelProcessTelemetry(t *testing.T) {
 func TestOCProcessTelemetry(t *testing.T) {
 	ocRegistry := metric.NewRegistry()
 
-	require.NoError(t, RegisterProcessMetrics(ocRegistry, otelmetric.NewNoopMeterProvider(), false, 0))
+	require.NoError(t, RegisterProcessMetrics(ocRegistry, noop.NewMeterProvider(), false, 0))
 
 	// Check that the metrics are actually filled.
 	<-time.After(200 * time.Millisecond)
@@ -186,7 +175,7 @@ func TestProcessTelemetryFailToRegister(t *testing.T) {
 			ocRegistry := metric.NewRegistry()
 			_, err := ocRegistry.AddFloat64Gauge(metricName)
 			require.NoError(t, err)
-			assert.Error(t, RegisterProcessMetrics(ocRegistry, otelmetric.NewNoopMeterProvider(), false, 0))
+			assert.Error(t, RegisterProcessMetrics(ocRegistry, noop.NewMeterProvider(), false, 0))
 		})
 	}
 }

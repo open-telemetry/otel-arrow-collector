@@ -1,16 +1,5 @@
 // Copyright The OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//       http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: Apache-2.0
 
 package extension
 
@@ -28,6 +17,7 @@ import (
 type nopExtension struct {
 	component.StartFunc
 	component.ShutdownFunc
+	CreateSettings
 }
 
 func TestNewFactory(t *testing.T) {
@@ -91,7 +81,6 @@ func TestMakeFactoryMap(t *testing.T) {
 func TestBuilder(t *testing.T) {
 	const typeStr = "test"
 	defaultCfg := struct{}{}
-	nopExtensionInstance := new(nopExtension)
 	testID := component.NewID(typeStr)
 	unknownID := component.NewID("unknown")
 
@@ -100,7 +89,7 @@ func TestBuilder(t *testing.T) {
 			typeStr,
 			func() component.Config { return &defaultCfg },
 			func(ctx context.Context, settings CreateSettings, extension component.Config) (Extension, error) {
-				return nopExtensionInstance, nil
+				return nopExtension{CreateSettings: settings}, nil
 			},
 			component.StabilityLevelDevelopment),
 	}...)
@@ -112,6 +101,11 @@ func TestBuilder(t *testing.T) {
 	e, err := b.Create(context.Background(), createSettings(testID))
 	assert.NoError(t, err)
 	assert.NotNil(t, e)
+
+	// Check that the extension has access to the resource attributes.
+	nop, ok := e.(nopExtension)
+	assert.True(t, ok)
+	assert.Equal(t, nop.CreateSettings.Resource.Attributes().Len(), 0)
 
 	missingType, err := b.Create(context.Background(), createSettings(unknownID))
 	assert.EqualError(t, err, "extension factory not available for: \"unknown\"")

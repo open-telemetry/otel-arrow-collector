@@ -1,16 +1,5 @@
 // Copyright The OpenTelemetry Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//       http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: Apache-2.0
 
 package featuregate
 
@@ -54,9 +43,20 @@ func TestRegistryApplyError(t *testing.T) {
 	r := NewRegistry()
 	assert.Error(t, r.Set("foo", true))
 	r.MustRegister("bar", StageAlpha)
+
+	assert.Error(t, r.Set("foo", true))
+	_, err := r.Register("foo", StageStable)
+	assert.Error(t, err)
 	assert.Error(t, r.Set("foo", true))
 	r.MustRegister("foo", StageStable, WithRegisterToVersion("next"))
-	assert.Error(t, r.Set("foo", true))
+	assert.Error(t, r.Set("foo", false))
+
+	assert.Error(t, r.Set("deprecated", true))
+	_, err = r.Register("deprecated", StageDeprecated)
+	assert.Error(t, err)
+	assert.Error(t, r.Set("deprecated", true))
+	r.MustRegister("deprecated", StageDeprecated, WithRegisterToVersion("next"))
+	assert.Error(t, r.Set("deprecated", true))
 }
 
 func TestRegistryApply(t *testing.T) {
@@ -113,6 +113,16 @@ func TestRegisterGateLifecycle(t *testing.T) {
 			shouldErr: false,
 		},
 		{
+			name:  "StageDeprecated Flag",
+			id:    "test-gate",
+			stage: StageDeprecated,
+			opts: []RegisterOption{
+				WithRegisterToVersion("next"),
+			},
+			enabled:   false,
+			shouldErr: false,
+		},
+		{
 			name:      "Invalid stage",
 			id:        "test-gate",
 			stage:     Stage(-1),
@@ -122,6 +132,12 @@ func TestRegisterGateLifecycle(t *testing.T) {
 			name:      "StageStable gate missing removal version",
 			id:        "test-gate",
 			stage:     StageStable,
+			shouldErr: true,
+		},
+		{
+			name:      "StageDeprecated gate missing removal version",
+			id:        "test-gate",
+			stage:     StageDeprecated,
 			shouldErr: true,
 		},
 		{

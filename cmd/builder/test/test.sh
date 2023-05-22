@@ -1,4 +1,8 @@
 #!/bin/bash
+#
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 WORKSPACE_DIR=$( cd -- "$( dirname "$(dirname "$(dirname -- "${SCRIPT_DIR}")")" )" &> /dev/null && pwd )
 export WORKSPACE_DIR
