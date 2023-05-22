@@ -23,8 +23,6 @@ import (
 	"strings"
 	"sync"
 
-	arrowpb "github.com/f5/otel-arrow-adapter/api/collector/arrow/v1"
-	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"golang.org/x/net/http2/hpack"
@@ -32,6 +30,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
+
+	arrowpb "github.com/f5/otel-arrow-adapter/api/experimental/arrow/v1"
+	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer/consumererror"
@@ -123,11 +124,11 @@ func (s *Stream) logStreamError(err error) {
 
 // run blocks the calling goroutine while executing stream logic.  run
 // will return when the reader and writer are finished.  errors will be logged.
-func (s *Stream) run(bgctx context.Context, client arrowpb.ArrowStreamServiceClient, grpcOptions []grpc.CallOption) {
+func (s *Stream) run(bgctx context.Context, streamClient streamClientFunc, grpcOptions []grpc.CallOption) {
 	ctx, cancel := context.WithCancel(bgctx)
 	defer cancel()
 
-	sc, err := client.ArrowStream(ctx, grpcOptions...)
+	sc, err := streamClient(ctx, grpcOptions...)
 	if err != nil {
 		// Returning with stream.client == nil signals the
 		// lack of an Arrow stream endpoint.  When all the
