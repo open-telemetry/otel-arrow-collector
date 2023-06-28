@@ -16,21 +16,21 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	"go.opentelemetry.io/collector/internal/netstats"
+	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/arrow"
+	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/logs"
+	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/metrics"
+	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/trace"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/config/confighttp"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/extension/auth"
-	"go.opentelemetry.io/collector/internal/netstats"
 	"go.opentelemetry.io/collector/obsreport"
 	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
 	"go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp"
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
 	"go.opentelemetry.io/collector/receiver"
-	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/arrow"
-	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/logs"
-	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/metrics"
-	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/trace"
 )
 
 // otlpReceiver is the type that exposes Trace and Metrics reception.
@@ -160,7 +160,7 @@ func (r *otlpReceiver) startProtocolServers(host component.Host) error {
 		if r.tracesReceiver != nil {
 			ptraceotlp.RegisterGRPCServer(r.serverGRPC, r.tracesReceiver)
 
-			if r.cfg.Arrow != nil && !r.cfg.Arrow.DisableSeparateSignals {
+			if r.cfg.Arrow != nil && !r.cfg.Arrow.Disabled && !r.cfg.Arrow.DisableSeparateSignals {
 				arrowpb.RegisterArrowTracesServiceServer(r.serverGRPC, r.arrowReceiver)
 			}
 		}
@@ -168,7 +168,7 @@ func (r *otlpReceiver) startProtocolServers(host component.Host) error {
 		if r.metricsReceiver != nil {
 			pmetricotlp.RegisterGRPCServer(r.serverGRPC, r.metricsReceiver)
 
-			if r.cfg.Arrow != nil && !r.cfg.Arrow.DisableSeparateSignals {
+			if r.cfg.Arrow != nil && !r.cfg.Arrow.Disabled && !r.cfg.Arrow.DisableSeparateSignals {
 				arrowpb.RegisterArrowMetricsServiceServer(r.serverGRPC, r.arrowReceiver)
 			}
 		}
@@ -176,7 +176,7 @@ func (r *otlpReceiver) startProtocolServers(host component.Host) error {
 		if r.logsReceiver != nil {
 			plogotlp.RegisterGRPCServer(r.serverGRPC, r.logsReceiver)
 
-			if r.cfg.Arrow != nil && !r.cfg.Arrow.DisableSeparateSignals {
+			if r.cfg.Arrow != nil && !r.cfg.Arrow.Disabled && !r.cfg.Arrow.DisableSeparateSignals {
 				arrowpb.RegisterArrowLogsServiceServer(r.serverGRPC, r.arrowReceiver)
 			}
 		}

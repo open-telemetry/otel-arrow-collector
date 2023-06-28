@@ -25,11 +25,6 @@ import (
 	"sync"
 	"testing"
 
-	arrowpb "github.com/f5/otel-arrow-adapter/api/experimental/arrow/v1"
-	arrowCollectorMock "github.com/f5/otel-arrow-adapter/api/experimental/arrow/v1/mock"
-	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
-	arrowRecordMock "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record/mock"
-	otelAssert "github.com/f5/otel-arrow-adapter/pkg/otel/assert"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -37,18 +32,25 @@ import (
 	"golang.org/x/net/http2/hpack"
 	"google.golang.org/grpc/metadata"
 
+	arrowpb "github.com/f5/otel-arrow-adapter/api/experimental/arrow/v1"
+	arrowCollectorMock "github.com/f5/otel-arrow-adapter/api/experimental/arrow/v1/mock"
+	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
+	arrowRecordMock "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record/mock"
+	otelAssert "github.com/f5/otel-arrow-adapter/pkg/otel/assert"
+
 	"go.opentelemetry.io/collector/client"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/extension/auth"
-	"go.opentelemetry.io/collector/internal/testdata"
 	"go.opentelemetry.io/collector/obsreport"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.opentelemetry.io/collector/receiver"
+
+	"go.opentelemetry.io/collector/internal/testdata"
 	"go.opentelemetry.io/collector/receiver/otlpreceiver/internal/arrow/mock"
 )
 
@@ -261,40 +263,26 @@ func (ctc *commonTestCase) wait() error {
 	return <-ctc.streamErr
 }
 
-func statusOKFor(batchID string) *arrowpb.BatchStatus {
+func statusOKFor(batchID int64) *arrowpb.BatchStatus {
 	return &arrowpb.BatchStatus{
-		Statuses: []*arrowpb.StatusMessage{
-			{
-				BatchId:    batchID,
-				StatusCode: arrowpb.StatusCode_OK,
-			},
-		},
+		BatchId:    batchID,
+		StatusCode: arrowpb.StatusCode_OK,
 	}
 }
 
-func statusUnavailableFor(batchID string, msg string) *arrowpb.BatchStatus {
+func statusUnavailableFor(batchID int64, msg string) *arrowpb.BatchStatus {
 	return &arrowpb.BatchStatus{
-		Statuses: []*arrowpb.StatusMessage{
-			{
-				BatchId:      batchID,
-				StatusCode:   arrowpb.StatusCode_ERROR,
-				ErrorCode:    arrowpb.ErrorCode_UNAVAILABLE,
-				ErrorMessage: msg,
-			},
-		},
+		BatchId:       batchID,
+		StatusCode:    arrowpb.StatusCode_UNAVAILABLE,
+		StatusMessage: msg,
 	}
 }
 
-func statusInvalidFor(batchID string, msg string) *arrowpb.BatchStatus {
+func statusInvalidFor(batchID int64, msg string) *arrowpb.BatchStatus {
 	return &arrowpb.BatchStatus{
-		Statuses: []*arrowpb.StatusMessage{
-			{
-				BatchId:      batchID,
-				StatusCode:   arrowpb.StatusCode_ERROR,
-				ErrorCode:    arrowpb.ErrorCode_INVALID_ARGUMENT,
-				ErrorMessage: msg,
-			},
-		},
+		BatchId:       batchID,
+		StatusCode:    arrowpb.StatusCode_INVALID_ARGUMENT,
+		StatusMessage: msg,
 	}
 }
 
@@ -553,22 +541,22 @@ func copyBatch(in *arrowpb.BatchArrowRecords) *arrowpb.BatchArrowRecords {
 	hcpy := make([]byte, len(in.Headers))
 	copy(hcpy, in.Headers)
 
-	pays := make([]*arrowpb.OtlpArrowPayload, len(in.OtlpArrowPayloads))
+	pays := make([]*arrowpb.ArrowPayload, len(in.ArrowPayloads))
 
-	for i, inp := range in.OtlpArrowPayloads {
+	for i, inp := range in.ArrowPayloads {
 		rcpy := make([]byte, len(inp.Record))
 		copy(rcpy, inp.Record)
-		pays[i] = &arrowpb.OtlpArrowPayload{
-			SubStreamId: inp.SubStreamId,
-			Type:        inp.Type,
-			Record:      rcpy,
+		pays[i] = &arrowpb.ArrowPayload{
+			SchemaId: inp.SchemaId,
+			Type:     inp.Type,
+			Record:   rcpy,
 		}
 	}
 
 	return &arrowpb.BatchArrowRecords{
-		BatchId:           in.BatchId,
-		Headers:           hcpy,
-		OtlpArrowPayloads: pays,
+		BatchId:       in.BatchId,
+		Headers:       hcpy,
+		ArrowPayloads: pays,
 	}
 }
 
@@ -1123,11 +1111,9 @@ func testReceiverAuthHeaders(t *testing.T, includeMeta bool, dataAuth bool) {
 
 	for idx, batch := range recvBatches {
 		if expectErrs[idx] {
-			require.Equal(t, 1, len(batch.Statuses))
-			require.Equal(t, arrowpb.StatusCode_ERROR, batch.Statuses[0].StatusCode)
+			require.NotEqual(t, arrowpb.StatusCode_OK, batch.StatusCode)
 		} else {
-			require.Equal(t, 1, len(batch.Statuses))
-			require.Equal(t, arrowpb.StatusCode_OK, batch.Statuses[0].StatusCode)
+			require.Equal(t, arrowpb.StatusCode_OK, batch.StatusCode)
 		}
 	}
 }

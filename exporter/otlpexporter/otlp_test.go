@@ -15,9 +15,6 @@ import (
 	"testing"
 	"time"
 
-	arrowpb "github.com/f5/otel-arrow-adapter/api/experimental/arrow/v1"
-	arrowpbMock "github.com/f5/otel-arrow-adapter/api/experimental/arrow/v1/mock"
-	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,6 +28,10 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	arrowpb "github.com/f5/otel-arrow-adapter/api/experimental/arrow/v1"
+	arrowpbMock "github.com/f5/otel-arrow-adapter/api/experimental/arrow/v1/mock"
+	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
+
 	"go.opentelemetry.io/collector/client"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/component/componenttest"
@@ -40,16 +41,17 @@ import (
 	"go.opentelemetry.io/collector/config/configtls"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/exportertest"
-	"go.opentelemetry.io/collector/exporter/otlpexporter/internal/arrow/grpcmock"
 	"go.opentelemetry.io/collector/extension"
 	"go.opentelemetry.io/collector/extension/auth"
-	"go.opentelemetry.io/collector/internal/testdata"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
+
+	"go.opentelemetry.io/collector/exporter/otlpexporter/internal/arrow/grpcmock"
+	"go.opentelemetry.io/collector/internal/testdata"
 )
 
 type mockReceiver struct {
@@ -882,19 +884,18 @@ func testSendArrowTraces(t *testing.T, mixedSignals, clientWaitForReady, streamS
 	require.EqualValues(t, expectedHeader, md.Get("header"))
 }
 
-func okStatusFor(id string) *arrowpb.StatusMessage {
-	return &arrowpb.StatusMessage{
+func okStatusFor(id int64) *arrowpb.BatchStatus {
+	return &arrowpb.BatchStatus{
 		BatchId:    id,
 		StatusCode: arrowpb.StatusCode_OK,
 	}
 }
 
-func failedStatusFor(id string) *arrowpb.StatusMessage {
-	return &arrowpb.StatusMessage{
-		BatchId:      id,
-		StatusCode:   arrowpb.StatusCode_ERROR,
-		ErrorCode:    arrowpb.ErrorCode_INVALID_ARGUMENT,
-		ErrorMessage: "test failed",
+func failedStatusFor(id int64) *arrowpb.BatchStatus {
+	return &arrowpb.BatchStatus{
+		BatchId:       id,
+		StatusCode:    arrowpb.StatusCode_INVALID_ARGUMENT,
+		StatusMessage: "test failed",
 	}
 }
 
@@ -904,7 +905,7 @@ type anyStreamServer interface {
 	grpc.ServerStream
 }
 
-func (r *mockTracesReceiver) startStreamMockArrowTraces(t *testing.T, mixedSignals bool, statusFor func(string) *arrowpb.StatusMessage) {
+func (r *mockTracesReceiver) startStreamMockArrowTraces(t *testing.T, mixedSignals bool, statusFor func(int64) *arrowpb.BatchStatus) {
 	ctrl := gomock.NewController(t)
 
 	doer := func(server anyStreamServer) error {
@@ -942,11 +943,7 @@ func (r *mockTracesReceiver) startStreamMockArrowTraces(t *testing.T, mixedSigna
 				_, err := r.Export(ctx, ptraceotlp.NewExportRequestFromTraces(traces))
 				require.NoError(t, err)
 			}
-			require.NoError(t, server.Send(&arrowpb.BatchStatus{
-				Statuses: []*arrowpb.StatusMessage{
-					statusFor(records.BatchId),
-				},
-			}))
+			require.NoError(t, server.Send(statusFor(records.BatchId)))
 		}
 		return nil
 	}
@@ -1036,4 +1033,55 @@ func TestSendArrowFailedTraces(t *testing.T) {
 	assert.EqualValues(t, int32(2), rcv.totalItems.Load())
 	assert.EqualValues(t, int32(1), rcv.requestCount.Load())
 	assert.EqualValues(t, td, rcv.getLastRequest())
+}
+
+func TestUserDialOptions(t *testing.T) {
+	// Start an OTLP-compatible receiver.
+	ln, err := net.Listen("tcp", "127.0.0.1:")
+	require.NoError(t, err, "Failed to find an available address to run the gRPC server: %v", err)
+
+	// Start an OTLP exporter and point to the receiver.
+	factory := NewFactory()
+	cfg := factory.CreateDefaultConfig().(*Config)
+	cfg.GRPCClientSettings = configgrpc.GRPCClientSettings{
+		Endpoint: ln.Addr().String(),
+		TLSSetting: configtls.TLSClientSetting{
+			Insecure: true,
+		},
+		WaitForReady: true,
+	}
+	cfg.Arrow.Disabled = true
+	cfg.QueueSettings.Enabled = false
+
+	const testAgent = "test-user-agent (release=:+1:)"
+
+	// This overrides the default provided in otlp.go
+	cfg.UserDialOptions = []grpc.DialOption{
+		grpc.WithUserAgent(testAgent),
+	}
+
+	set := exportertest.NewNopCreateSettings()
+	set.TelemetrySettings.Logger = zaptest.NewLogger(t)
+	exp, err := factory.CreateTracesExporter(context.Background(), set, cfg)
+	require.NoError(t, err)
+	require.NotNil(t, exp)
+
+	defer func() {
+		assert.NoError(t, exp.Shutdown(context.Background()))
+	}()
+
+	host := componenttest.NewNopHost()
+	assert.NoError(t, exp.Start(context.Background(), host))
+
+	td := testdata.GenerateTraces(2)
+
+	rcv, _ := otlpTracesReceiverOnGRPCServer(ln, false)
+	rcv.start()
+	defer rcv.srv.GracefulStop()
+
+	err = exp.ConsumeTraces(context.Background(), td)
+	assert.NoError(t, err)
+
+	require.Equal(t, len(rcv.getMetadata().Get("User-Agent")), 1)
+	require.Contains(t, rcv.getMetadata().Get("User-Agent")[0], testAgent)
 }
