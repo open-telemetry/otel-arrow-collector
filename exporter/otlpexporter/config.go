@@ -6,10 +6,11 @@ package otlpexporter // import "go.opentelemetry.io/collector/exporter/otlpexpor
 import (
 	"fmt"
 
+	"google.golang.org/grpc"
+
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
-	"google.golang.org/grpc"
 )
 
 // Config defines configuration for OTLP exporter.
