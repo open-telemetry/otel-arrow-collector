@@ -47,6 +47,7 @@ type baseExporter struct {
 	callOptions    []grpc.CallOption
 	settings       exporter.CreateSettings
 	netStats       *netstats.NetworkReporter
+	dialOptions    []grpc.DialOption
 
 	// Default user-agent header.
 	userAgent string
@@ -97,6 +98,7 @@ func (e *baseExporter) start(ctx context.Context, host component.Host) (err erro
 	if e.netStats != nil {
 		dialOpts = append(dialOpts, grpc.WithStatsHandler(e.netStats))
 	}
+	dialOpts = append(dialOpts, e.config.UserDialOptions...)
 	if e.clientConn, err = e.config.GRPCClientSettings.ToClientConn(ctx, host, e.settings.TelemetrySettings, dialOpts...); err != nil {
 		return err
 	}

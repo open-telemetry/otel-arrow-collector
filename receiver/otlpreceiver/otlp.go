@@ -160,7 +160,7 @@ func (r *otlpReceiver) startProtocolServers(host component.Host) error {
 		if r.tracesReceiver != nil {
 			ptraceotlp.RegisterGRPCServer(r.serverGRPC, r.tracesReceiver)
 
-			if r.cfg.Arrow != nil && !r.cfg.Arrow.DisableSeparateSignals {
+			if r.cfg.Arrow != nil && !r.cfg.Arrow.Disabled && !r.cfg.Arrow.DisableSeparateSignals {
 				arrowpb.RegisterArrowTracesServiceServer(r.serverGRPC, r.arrowReceiver)
 			}
 		}
@@ -168,7 +168,7 @@ func (r *otlpReceiver) startProtocolServers(host component.Host) error {
 		if r.metricsReceiver != nil {
 			pmetricotlp.RegisterGRPCServer(r.serverGRPC, r.metricsReceiver)
 
-			if r.cfg.Arrow != nil && !r.cfg.Arrow.DisableSeparateSignals {
+			if r.cfg.Arrow != nil && !r.cfg.Arrow.Disabled && !r.cfg.Arrow.DisableSeparateSignals {
 				arrowpb.RegisterArrowMetricsServiceServer(r.serverGRPC, r.arrowReceiver)
 			}
 		}
@@ -176,7 +176,7 @@ func (r *otlpReceiver) startProtocolServers(host component.Host) error {
 		if r.logsReceiver != nil {
 			plogotlp.RegisterGRPCServer(r.serverGRPC, r.logsReceiver)
 
-			if r.cfg.Arrow != nil && !r.cfg.Arrow.DisableSeparateSignals {
+			if r.cfg.Arrow != nil && !r.cfg.Arrow.Disabled && !r.cfg.Arrow.DisableSeparateSignals {
 				arrowpb.RegisterArrowLogsServiceServer(r.serverGRPC, r.arrowReceiver)
 			}
 		}

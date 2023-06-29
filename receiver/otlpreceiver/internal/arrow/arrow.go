@@ -21,8 +21,6 @@ import (
 	"io"
 	"strings"
 
-	arrowpb "github.com/f5/otel-arrow-adapter/api/experimental/arrow/v1"
-	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"golang.org/x/net/http2/hpack"
@@ -30,6 +28,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+
+	arrowpb "github.com/f5/otel-arrow-adapter/api/experimental/arrow/v1"
+	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
 
 	"go.opentelemetry.io/collector/client"
 	"go.opentelemetry.io/collector/component"
@@ -233,6 +234,10 @@ func (r *Receiver) logStreamError(err error) {
 		switch status.Code() {
 		case codes.Canceled:
 			r.telemetry.Logger.Debug("arrow stream canceled")
+		case codes.Unavailable:
+			r.telemetry.Logger.Info("arrow stream unavailable",
+				zap.String("message", status.Message()),
+			)
 		default:
 			r.telemetry.Logger.Error("arrow stream error",
 				zap.Uint32("code", uint32(status.Code())),
@@ -277,12 +282,22 @@ type anyStreamServer interface {
 	grpc.ServerStream
 }
 
-func (r *Receiver) anyStream(serverStream anyStreamServer) error {
+func (r *Receiver) anyStream(serverStream anyStreamServer) (retErr error) {
 	streamCtx := serverStream.Context()
 	ac := r.newConsumer()
 	hrcv := newHeaderReceiver(serverStream.Context(), r.authServer, r.gsettings.IncludeMetadata)
 
 	defer func() {
+		if err := recover(); err != nil {
+			// When this happens, the stacktrace is
+			// important and lost if we don't capture it
+			// here.
+			r.telemetry.Logger.Debug("panic detail in otel-arrow-adapter",
+				zap.Reflect("recovered", err),
+				zap.Stack("stacktrace"),
+			)
+			retErr = fmt.Errorf("panic in otel-arrow-adapter: %v", err)
+		}
 		if err := ac.Close(); err != nil {
 			r.telemetry.Logger.Error("arrow stream close", zap.Error(err))
 		}
@@ -326,27 +341,24 @@ func (r *Receiver) anyStream(serverStream anyStreamServer) error {
 
 		// Note: Statuses can be batched, but we do not take
 		// advantage of this feature.
-		resp := &arrowpb.BatchStatus{}
-		status := &arrowpb.StatusMessage{
+		status := &arrowpb.BatchStatus{
 			BatchId: req.GetBatchId(),
 		}
 		if err == nil {
 			status.StatusCode = arrowpb.StatusCode_OK
 		} else {
-			status.StatusCode = arrowpb.StatusCode_ERROR
-			status.ErrorMessage = err.Error()
+			status.StatusMessage = err.Error()
 
 			if consumererror.IsPermanent(err) {
 				r.telemetry.Logger.Error("arrow data error", zap.Error(err))
-				status.ErrorCode = arrowpb.ErrorCode_INVALID_ARGUMENT
+				status.StatusCode = arrowpb.StatusCode_INVALID_ARGUMENT
 			} else {
 				r.telemetry.Logger.Debug("arrow consumer error", zap.Error(err))
-				status.ErrorCode = arrowpb.ErrorCode_UNAVAILABLE
+				status.StatusCode = arrowpb.StatusCode_UNAVAILABLE
 			}
 		}
-		resp.Statuses = append(resp.Statuses, status)
 
-		err = serverStream.Send(resp)
+		err = serverStream.Send(status)
 		if err != nil {
 			r.logStreamError(err)
 			return err
@@ -359,12 +371,12 @@ func (r *Receiver) anyStream(serverStream anyStreamServer) error {
 // argument) or (false) from the consuming pipeline.  The boolean is
 // not used when success (nil error) is returned.
 func (r *Receiver) processRecords(ctx context.Context, arrowConsumer arrowRecord.ConsumerAPI, records *arrowpb.BatchArrowRecords) error {
-	payloads := records.GetOtlpArrowPayloads()
+	payloads := records.GetArrowPayloads()
 	if len(payloads) == 0 {
 		return nil
 	}
 	switch payloads[0].Type {
-	case arrowpb.OtlpArrowPayloadType_METRICS:
+	case arrowpb.ArrowPayloadType_METRICS:
 		if r.Metrics() == nil {
 			return status.Error(codes.Unimplemented, "metrics service not available")
 		}
@@ -385,7 +397,7 @@ func (r *Receiver) processRecords(ctx context.Context, arrowConsumer arrowRecord
 		r.obsrecv.EndMetricsOp(ctx, streamFormat, numPts, err)
 		return err
 
-	case arrowpb.OtlpArrowPayloadType_LOGS:
+	case arrowpb.ArrowPayloadType_LOGS:
 		if r.Logs() == nil {
 			return status.Error(codes.Unimplemented, "logs service not available")
 		}
@@ -406,7 +418,7 @@ func (r *Receiver) processRecords(ctx context.Context, arrowConsumer arrowRecord
 		r.obsrecv.EndLogsOp(ctx, streamFormat, numLogs, err)
 		return err
 
-	case arrowpb.OtlpArrowPayloadType_SPANS:
+	case arrowpb.ArrowPayloadType_SPANS:
 		if r.Traces() == nil {
 			return status.Error(codes.Unimplemented, "traces service not available")
 		}

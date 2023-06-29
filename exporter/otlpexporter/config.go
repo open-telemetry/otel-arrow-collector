@@ -6,6 +6,8 @@ package otlpexporter // import "go.opentelemetry.io/collector/exporter/otlpexpor
 import (
 	"fmt"
 
+	"google.golang.org/grpc"
+
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configgrpc"
 	"go.opentelemetry.io/collector/exporter/exporterhelper"
@@ -20,6 +22,12 @@ type Config struct {
 	configgrpc.GRPCClientSettings `mapstructure:",squash"` // squash ensures fields are correctly decoded in embedded struct.
 
 	Arrow ArrowSettings `mapstructure:"arrow"`
+
+	// UserDialOptions cannot be configured via `mapstructure`
+	// schemes.  This is useful for custom purposes where the
+	// exporter is built and configured via code instead of yaml.
+	// Uses include custom dialer, custom user-agent, etc.
+	UserDialOptions []grpc.DialOption `mapstructure:"-"`
 }
 
 // ArrowSettings includes whether Arrow is enabled and the number of

@@ -68,7 +68,7 @@ type Stream struct {
 	lock sync.Mutex
 
 	// waiters is the response channel for each active batch.
-	waiters map[string]chan error
+	waiters map[int64]chan error
 }
 
 // writeItem is passed from the sender (a pipeline consumer) to the
@@ -95,13 +95,13 @@ func newStream(
 		perRPCCredentials: perRPCCredentials,
 		telemetry:         telemetry,
 		toWrite:           make(chan writeItem, 1),
-		waiters:           map[string]chan error{},
+		waiters:           map[int64]chan error{},
 	}
 }
 
 // setBatchChannel places a waiting consumer's batchID into the waiters map, where
 // the stream reader may find it.
-func (s *Stream) setBatchChannel(batchID string, errCh chan error) {
+func (s *Stream) setBatchChannel(batchID int64, errCh chan error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -196,10 +196,23 @@ func (s *Stream) run(bgctx context.Context, streamClient StreamClientFunc, grpcO
 					zap.String("message", status.Message()),
 				)
 
-			case codes.Unavailable:
+			case codes.Unavailable, codes.Internal:
 				// gRPC returns this when max connection age is reached.
 				// The message string will contain NO_ERROR if it's a
 				// graceful shutdown.
+				//
+				// Having seen:
+				//
+				//     arrow stream unknown {"kind": "exporter",
+				//     "data_type": "traces", "name": "otlp/traces",
+				//     "code": 13, "message": "stream terminated by
+				//     RST_STREAM with error code: NO_ERROR"}
+				//
+				// from the default case below print `"code": 13`, this
+				// branch is now used for both Unavailable (witnessed
+				// in local testing) and Internal (witnessed in
+				// production); in both cases "NO_ERROR" is the key
+				// signifier.
 				if strings.Contains(status.Message(), "NO_ERROR") {
 					s.telemetry.Logger.Debug("arrow stream shutdown")
 				} else {
@@ -330,7 +343,7 @@ func (s *Stream) read(_ context.Context) error {
 			return err
 		}
 
-		if err = s.processBatchStatus(resp.Statuses); err != nil {
+		if err = s.processBatchStatus(resp); err != nil {
 			return fmt.Errorf("process: %w", err)
 		}
 	}
@@ -341,63 +354,49 @@ func (s *Stream) read(_ context.Context) error {
 // with the same index as the original status, for correlation.  Nil
 // channels will be returned when there are errors locating the
 // sender channel.
-func (s *Stream) getSenderChannels(statuses []*arrowpb.StatusMessage) ([]chan error, error) {
-	var err error
-
-	fin := make([]chan error, len(statuses))
-
+func (s *Stream) getSenderChannels(status *arrowpb.BatchStatus) (chan error, error) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	for idx, status := range statuses {
-		ch, ok := s.waiters[status.BatchId]
-		if !ok {
-			// Will break the stream.
-			err = multierr.Append(err, fmt.Errorf("unrecognized batch ID: %s", status.BatchId))
-			continue
-		}
-		delete(s.waiters, status.BatchId)
-		fin[idx] = ch
+	ch, ok := s.waiters[status.BatchId]
+	if !ok {
+		// Will break the stream.
+		return nil, fmt.Errorf("unrecognized batch ID: %d", status.BatchId)
 	}
-
-	return fin, err
+	delete(s.waiters, status.BatchId)
+	return ch, nil
 }
 
 // processBatchStatus processes a single response from the server and unblocks the
-// associated senders.
-func (s *Stream) processBatchStatus(statuses []*arrowpb.StatusMessage) error {
-	fin, ret := s.getSenderChannels(statuses)
+// associated sender.
+func (s *Stream) processBatchStatus(status *arrowpb.BatchStatus) error {
+	ch, ret := s.getSenderChannels(status)
 
-	for idx, ch := range fin {
-		if ch == nil {
-			// In case getSenderChannels encounters a problem, the
-			// channel is nil.
-			continue
-		}
-		status := statuses[idx]
-
-		if status.StatusCode == arrowpb.StatusCode_OK {
-			ch <- nil
-			continue
-		}
-		var err error
-		switch status.ErrorCode {
-		case arrowpb.ErrorCode_UNAVAILABLE:
-			// TODO: translate retry information into the form
-			// exporterhelper recognizes.
-			err = fmt.Errorf("destination unavailable: %s: %s", status.BatchId, status.ErrorMessage)
-		case arrowpb.ErrorCode_INVALID_ARGUMENT:
-			err = consumererror.NewPermanent(
-				fmt.Errorf("invalid argument: %s: %s", status.BatchId, status.ErrorMessage))
-		default:
-			base := fmt.Errorf("unexpected stream response: %s: %s", status.BatchId, status.ErrorMessage)
-			err = consumererror.NewPermanent(base)
-
-			// Will break the stream.
-			ret = multierr.Append(ret, base)
-		}
-		ch <- err
+	if ch == nil {
+		// In case getSenderChannels encounters a problem, the
+		// channel is nil.
+		return ret
 	}
+
+	if status.StatusCode == arrowpb.StatusCode_OK {
+		ch <- nil
+		return nil
+	}
+	var err error
+	switch status.StatusCode {
+	case arrowpb.StatusCode_UNAVAILABLE:
+		err = fmt.Errorf("destination unavailable: %d: %s", status.BatchId, status.StatusMessage)
+	case arrowpb.StatusCode_INVALID_ARGUMENT:
+		err = consumererror.NewPermanent(
+			fmt.Errorf("invalid argument: %d: %s", status.BatchId, status.StatusMessage))
+	default:
+		base := fmt.Errorf("unexpected stream response: %d: %s", status.BatchId, status.StatusMessage)
+		err = consumererror.NewPermanent(base)
+
+		// Will break the stream.
+		ret = multierr.Append(ret, base)
+	}
+	ch <- err
 	return ret
 }
 
