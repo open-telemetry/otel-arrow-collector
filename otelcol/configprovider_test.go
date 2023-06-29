@@ -18,11 +18,13 @@ import (
 	"go.opentelemetry.io/collector/confmap"
 	"go.opentelemetry.io/collector/confmap/provider/fileprovider"
 	"go.opentelemetry.io/collector/confmap/provider/yamlprovider"
+	"go.opentelemetry.io/collector/connector/connectortest"
 	"go.opentelemetry.io/collector/exporter/exportertest"
 	"go.opentelemetry.io/collector/extension/extensiontest"
 	"go.opentelemetry.io/collector/processor/processortest"
 	"go.opentelemetry.io/collector/receiver/receivertest"
 	"go.opentelemetry.io/collector/service"
+	"go.opentelemetry.io/collector/service/pipelines"
 	"go.opentelemetry.io/collector/service/telemetry"
 )
 
@@ -30,14 +32,15 @@ var configNop = &Config{
 	Receivers:  map[component.ID]component.Config{component.NewID("nop"): receivertest.NewNopFactory().CreateDefaultConfig()},
 	Processors: map[component.ID]component.Config{component.NewID("nop"): processortest.NewNopFactory().CreateDefaultConfig()},
 	Exporters:  map[component.ID]component.Config{component.NewID("nop"): exportertest.NewNopFactory().CreateDefaultConfig()},
+	Connectors: map[component.ID]component.Config{component.NewIDWithName("nop", "con"): connectortest.NewNopFactory().CreateDefaultConfig()},
 	Extensions: map[component.ID]component.Config{component.NewID("nop"): extensiontest.NewNopFactory().CreateDefaultConfig()},
 	Service: service.Config{
 		Extensions: []component.ID{component.NewID("nop")},
-		Pipelines: map[component.ID]*service.PipelineConfig{
+		Pipelines: pipelines.Config{
 			component.NewID("traces"): {
 				Receivers:  []component.ID{component.NewID("nop")},
 				Processors: []component.ID{component.NewID("nop")},
-				Exporters:  []component.ID{component.NewID("nop")},
+				Exporters:  []component.ID{component.NewID("nop"), component.NewIDWithName("nop", "con")},
 			},
 			component.NewID("metrics"): {
 				Receivers:  []component.ID{component.NewID("nop")},
@@ -45,7 +48,7 @@ var configNop = &Config{
 				Exporters:  []component.ID{component.NewID("nop")},
 			},
 			component.NewID("logs"): {
-				Receivers:  []component.ID{component.NewID("nop")},
+				Receivers:  []component.ID{component.NewID("nop"), component.NewIDWithName("nop", "con")},
 				Processors: []component.ID{component.NewID("nop")},
 				Exporters:  []component.ID{component.NewID("nop")},
 			},

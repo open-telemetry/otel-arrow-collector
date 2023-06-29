@@ -19,7 +19,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v4
         with:
-          go-version: ~1.19.9
+          go-version: ~1.19.10
       - name: Cache Go
         id: go-cache
         uses: actions/cache@v3
@@ -41,7 +41,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v4
         with:
-          go-version: ~1.19.9
+          go-version: ~1.19.10
       - name: Cache Go
         id: go-cache
         uses: actions/cache@v3
@@ -64,7 +64,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v4
         with:
-          go-version: ~1.19.9
+          go-version: ~1.19.10
       - name: Cache Go
         id: go-cache
         uses: actions/cache@v3
@@ -88,7 +88,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v4
         with:
-          go-version: ~1.19.9
+          go-version: ~1.19.10
       - name: Cache Go
         id: go-cache
         uses: actions/cache@v3
@@ -168,7 +168,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v4
         with:
-          go-version: ~1.19.9
+          go-version: ~1.19.10
       - name: Cache Go
         id: go-cache
         uses: actions/cache@v3
@@ -217,6 +217,7 @@ jobs:
             goarch: ppc64le
           - goos: linux
             goarch: arm
+            goarm: 7
           - goos: windows
             goarch: 386
           - goos: windows
@@ -228,7 +229,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v4
         with:
-          go-version: ~1.19.9
+          go-version: ~1.19.10
       - name: Cache Go
         id: go-cache
         uses: actions/cache@v3
@@ -241,5 +242,6 @@ jobs:
         env:
           GOOS: ${{matrix.goos}}
           GOARCH: ${{matrix.goarch}}
+          GOARM: ${{matrix.goarm}}
         run: |
           make otelcorecol

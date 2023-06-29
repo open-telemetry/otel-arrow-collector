@@ -22,6 +22,7 @@ import (
 	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/service/internal/capabilityconsumer"
 	"go.opentelemetry.io/collector/service/internal/fanoutconsumer"
+	"go.opentelemetry.io/collector/service/pipelines"
 )
 
 // Settings holds configuration for building builtPipelines.
@@ -35,13 +36,7 @@ type Settings struct {
 	ConnectorBuilder *connector.Builder
 
 	// PipelineConfigs is a map of component.ID to PipelineConfig.
-	PipelineConfigs map[component.ID]*PipelineConfig
-}
-
-type PipelineConfig struct {
-	Receivers  []component.ID
-	Processors []component.ID
-	Exporters  []component.ID
+	PipelineConfigs pipelines.Config
 }
 
 type Graph struct {
@@ -310,6 +305,12 @@ func (g *Graph) ShutdownAll(ctx context.Context) error {
 	return errs
 }
 
+// Deprecated: [0.79.0] This function will be removed in the future.
+// Several components in the contrib repository use this function so it cannot be removed
+// before those cases are removed. In most cases, use of this function can be replaced by a
+// connector. See https://github.com/open-telemetry/opentelemetry-collector/issues/7370 and
+// https://github.com/open-telemetry/opentelemetry-collector/pull/7390#issuecomment-1483710184
+// for additional information.
 func (g *Graph) GetExporters() map[component.DataType]map[component.ID]component.Component {
 	exportersMap := make(map[component.DataType]map[component.ID]component.Component)
 	exportersMap[component.DataTypeTraces] = make(map[component.ID]component.Component)

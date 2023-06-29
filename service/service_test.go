@@ -30,6 +30,8 @@ import (
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/processor/processortest"
 	"go.opentelemetry.io/collector/receiver/receivertest"
+	"go.opentelemetry.io/collector/service/extensions"
+	"go.opentelemetry.io/collector/service/pipelines"
 	"go.opentelemetry.io/collector/service/telemetry"
 )
 
@@ -338,13 +340,20 @@ func TestServiceTelemetryRestart(t *testing.T) {
 	require.NoError(t, srvTwo.Start(context.Background()))
 
 	// check telemetry server to ensure we get a response
-	// #nosec G107
-	resp, err = http.Get(telemetryURL)
-	assert.NoError(t, err)
+	require.Eventually(t,
+		func() bool {
+			// #nosec G107
+			resp, err = http.Get(telemetryURL)
+			return err == nil
+		},
+		500*time.Millisecond,
+		100*time.Millisecond,
+		"Must get a valid response from the service",
+	)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	// Shutdown the new service
-	require.NoError(t, srvTwo.Shutdown(context.Background()))
+	assert.NoError(t, srvTwo.Shutdown(context.Background()))
 }
 
 func assertResourceLabels(t *testing.T, res pcommon.Resource, expectedLabels map[string]labelValue) {
@@ -447,7 +456,7 @@ func newNopSettings() Settings {
 }
 
 func newNopConfig() Config {
-	return newNopConfigPipelineConfigs(map[component.ID]*PipelineConfig{
+	return newNopConfigPipelineConfigs(pipelines.Config{
 		component.NewID("traces"): {
 			Receivers:  []component.ID{component.NewID("nop")},
 			Processors: []component.ID{component.NewID("nop")},
@@ -466,9 +475,9 @@ func newNopConfig() Config {
 	})
 }
 
-func newNopConfigPipelineConfigs(pipelineCfgs map[component.ID]*PipelineConfig) Config {
+func newNopConfigPipelineConfigs(pipelineCfgs pipelines.Config) Config {
 	return Config{
-		Extensions: []component.ID{component.NewID("nop")},
+		Extensions: extensions.Config{component.NewID("nop")},
 		Pipelines:  pipelineCfgs,
 		Telemetry: telemetry.Config{
 			Logs: telemetry.LogsConfig{
