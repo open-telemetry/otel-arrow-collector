@@ -17,18 +17,22 @@ type componentsOutput struct {
 	Receivers  []component.Type
 	Processors []component.Type
 	Exporters  []component.Type
+	Connectors []component.Type
 	Extensions []component.Type
 }
 
-// newBuildSubCommand constructs a new cobra.Command sub command using the given CollectorSettings.
-func newBuildSubCommand(set CollectorSettings) *cobra.Command {
-	buildCmd := &cobra.Command{
+// newComponentsCommand constructs a new components command using the given CollectorSettings.
+func newComponentsCommand(set CollectorSettings) *cobra.Command {
+	return &cobra.Command{
 		Use:   "components",
 		Short: "Outputs available components in this collector distribution",
 		Args:  cobra.ExactArgs(0),
 		RunE: func(cmd *cobra.Command, args []string) error {
 
 			components := componentsOutput{}
+			for con := range set.Factories.Connectors {
+				components.Connectors = append(components.Connectors, con)
+			}
 			for ext := range set.Factories.Extensions {
 				components.Extensions = append(components.Extensions, ext)
 			}
@@ -50,5 +54,4 @@ func newBuildSubCommand(set CollectorSettings) *cobra.Command {
 			return nil
 		},
 	}
-	return buildCmd
 }
