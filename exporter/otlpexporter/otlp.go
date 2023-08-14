@@ -11,7 +11,7 @@ import (
 	"time"
 
 	arrowPkg "github.com/apache/arrow/go/v12/arrow"
-	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
+	arrowRecord "github.com/open-telemetry/otel-arrow/pkg/otel/arrow_record"
 	"go.uber.org/multierr"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
@@ -131,7 +131,7 @@ func (e *baseExporter) start(ctx context.Context, host component.Host) (err erro
 			}
 		}
 
-		e.arrow = arrow.NewExporter(e.config.Arrow.NumStreams, e.config.Arrow.DisableDowngrade, e.settings.TelemetrySettings, e.callOptions, func() arrowRecord.ProducerAPI {
+		e.arrow = arrow.NewExporter(e.config.Arrow.MaxStreamLifetime, e.config.Arrow.NumStreams, e.config.Arrow.DisableDowngrade, e.settings.TelemetrySettings, e.callOptions, func() arrowRecord.ProducerAPI {
 			return arrowRecord.NewProducer()
 		}, e.streamClientFactory(e.config, e.clientConn), perRPCCreds)
 

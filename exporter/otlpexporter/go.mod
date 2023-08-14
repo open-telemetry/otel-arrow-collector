@@ -4,8 +4,8 @@ go 1.19
 
 require (
 	github.com/apache/arrow/go/v12 v12.0.1
-	github.com/f5/otel-arrow-adapter v0.0.0-20230629002931-9dac16c8ad8f
 	github.com/golang/mock v1.6.0
+	github.com/open-telemetry/otel-arrow v0.0.0-20230814172509-caeffd6edc60
 	github.com/stretchr/testify v1.8.4
 	go.opentelemetry.io/collector v0.80.0
 	go.opentelemetry.io/collector/component v0.80.0
@@ -49,7 +49,7 @@ require (
 	github.com/google/flatbuffers v2.0.8+incompatible // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/asmfmt v1.3.2 // indirect
-	github.com/klauspost/compress v1.16.6 // indirect
+	github.com/klauspost/compress v1.16.7 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
 	github.com/knadh/koanf v1.5.0 // indirect
 	github.com/minio/asm2plan9s v0.0.0-20200509001527-cdd76441f9d8 // indirect

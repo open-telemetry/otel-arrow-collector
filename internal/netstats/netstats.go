@@ -40,7 +40,7 @@ const (
 	// (includes compression) by exporters and receivers.
 	RecvWireBytes = "recv_wire"
 
-	scopeName = "github.com/f5/otel-arrow-adapter/collector/netstats"
+	scopeName = "github.com/open-telemetry/otel-arrow/collector/netstats"
 )
 
 // NetworkReporter is a helper to add network-level observability to

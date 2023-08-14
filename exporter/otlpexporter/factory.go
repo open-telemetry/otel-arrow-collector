@@ -6,8 +6,9 @@ package otlpexporter // import "go.opentelemetry.io/collector/exporter/otlpexpor
 import (
 	"context"
 	"runtime"
+	"time"
 
-	arrowpb "github.com/f5/otel-arrow-adapter/api/experimental/arrow/v1"
+	arrowpb "github.com/open-telemetry/otel-arrow/api/experimental/arrow/v1"
 	"google.golang.org/grpc"
 
 	"go.opentelemetry.io/collector/component"
@@ -22,7 +23,7 @@ import (
 
 const (
 	// The value of "type" key in configuration.
-	typeStr = "otlp"
+	typeStr = "otelarrow"
 )
 
 // NewFactory creates a factory for OTLP exporter.
@@ -49,7 +50,8 @@ func createDefaultConfig() component.Config {
 			WriteBufferSize: 512 * 1024,
 		},
 		Arrow: ArrowSettings{
-			NumStreams: runtime.NumCPU(),
+			NumStreams:        runtime.NumCPU(),
+			MaxStreamLifetime: time.Hour,
 		},
 	}
 }
