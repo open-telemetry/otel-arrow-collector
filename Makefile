@@ -57,11 +57,12 @@ gotest:
 .PHONY: gobenchmark
 gobenchmark:
 	@$(MAKE) for-all-target TARGET="benchmark"
+	cat `find . -name benchmark.txt` > benchmarks.txt
 
 .PHONY: gotest-with-cover
-gotest-with-cover: $(GOCOVMERGE)
+gotest-with-cover:
 	@$(MAKE) for-all-target TARGET="test-with-cover"
-	$(GOCOVMERGE) $$(find . -name coverage.out) > coverage.txt
+	$(GOCMD) tool covdata textfmt -i=./coverage/unit -o ./coverage.txt
 
 .PHONY: goporto
 goporto: $(PORTO)
@@ -186,7 +187,7 @@ gendependabot: $(eval SHELL:=/bin/bash)
 OPENTELEMETRY_PROTO_SRC_DIR=pdata/internal/opentelemetry-proto
 
 # The SHA matching the current version of the proto to use
-OPENTELEMETRY_PROTO_VERSION=v0.20.0
+OPENTELEMETRY_PROTO_VERSION=v1.0.0
 
 # Find all .proto files.
 OPENTELEMETRY_PROTO_FILES := $(subst $(OPENTELEMETRY_PROTO_SRC_DIR)/,,$(wildcard $(OPENTELEMETRY_PROTO_SRC_DIR)/opentelemetry/proto/*/v1/*.proto $(OPENTELEMETRY_PROTO_SRC_DIR)/opentelemetry/proto/collector/*/v1/*.proto))
@@ -257,6 +258,32 @@ genproto_sub:
 genpdata:
 	$(GOCMD) run pdata/internal/cmd/pdatagen/main.go
 	$(MAKE) fmt
+
+# The source directory for configuration schema.
+OPENTELEMETRY_JSONSCHEMA_SRC_DIR=service/internal/proctelemetry/opentelememetry-configuration
+
+# The SHA matching the current version of the configuration schema to use
+OPENTELEMETRY_JSONSCHEMA_VERSION=main
+
+# Cleanup temporary directory
+genjsonschema-cleanup:
+	rm -Rf ${OPENTELEMETRY_JSONSCHEMA_SRC_DIR}
+
+# Generate structs for configuration from configuration schema
+genjsonschema: genjsonschema-cleanup $(GOJSONSCHEMA)
+	mkdir -p ${OPENTELEMETRY_JSONSCHEMA_SRC_DIR}
+	curl -sSL https://api.github.com/repos/open-telemetry/opentelemetry-configuration/tarball/${OPENTELEMETRY_JSONSCHEMA_VERSION} | tar xz --strip 1 -C ${OPENTELEMETRY_JSONSCHEMA_SRC_DIR}
+	$(GOJSONSCHEMA) \
+		--package telemetry \
+		--tags mapstructure \
+		--output ./service/telemetry/generated_config.go \
+		--schema-package=https://opentelemetry.io/otelconfig/opentelemetry_configuration.json=github.com/open-telemetry/opentelemetry-collector/schema \
+    	${OPENTELEMETRY_JSONSCHEMA_SRC_DIR}/schema/opentelemetry_configuration.json
+	@echo Modify jsonschema generated files.
+	sed -f $(TOOLS_MOD_DIR)/jsonschema_patch.sed service/telemetry/generated_config.go > service/telemetry/generated_config_tmp.go
+	mv service/telemetry/generated_config_tmp.go service/telemetry/generated_config.go
+	$(MAKE) fmt
+	$(MAKE) genjsonschema-cleanup
 
 # Generate semantic convention constants. Requires a clone of the opentelemetry-specification repo
 gensemconv:
@@ -366,8 +393,8 @@ certs-dryrun:
 
 # Verify existence of READMEs for components specified as default components in the collector.
 .PHONY: checkdoc
-checkdoc: $(CHECKDOC)
-	$(CHECKDOC) --project-path $(CURDIR) --component-rel-path $(COMP_REL_PATH) --module-name $(MOD_NAME)
+checkdoc: $(CHECKFILE)
+	$(CHECKFILE) --project-path $(CURDIR) --component-rel-path $(COMP_REL_PATH) --module-name $(MOD_NAME) --file-name "README.md"
 
 # Construct new API state snapshots
 .PHONY: apidiff-build
@@ -507,22 +534,23 @@ crosslink: $(CROSSLINK)
 	$(CROSSLINK) --root=$(shell pwd) --prune
 
 
-FILENAME?=$(shell git branch --show-current).yaml
+FILENAME?=$(shell git branch --show-current)
 .PHONY: chlog-new
-chlog-new: $(CHLOG)
-	$(CHLOG) new --filename $(FILENAME)
+chlog-new: $(CHLOGGEN)
+	$(CHLOGGEN) new --config $(CHLOGGEN_CONFIG) --filename $(FILENAME)
 
 .PHONY: chlog-validate
-chlog-validate: $(CHLOG)
-	$(CHLOG) validate
+chlog-validate: $(CHLOGGEN)
+	$(CHLOGGEN) validate --config $(CHLOGGEN_CONFIG)
 
 .PHONY: chlog-preview
-chlog-preview: $(CHLOG)
-	$(CHLOG) update --dry
+chlog-preview: $(CHLOGGEN)
+	$(CHLOGGEN) update --config $(CHLOGGEN_CONFIG) --dry
 
 .PHONY: chlog-update
-chlog-update: $(CHLOG)
-	$(CHLOG) update --version $(VERSION)
+chlog-update: $(CHLOGGEN)
+	$(CHLOGGEN) update --config $(CHLOGGEN_CONFIG) --version $(VERSION)
+
 
 .PHONY: builder-integration-test
 builder-integration-test: $(ENVSUBST)

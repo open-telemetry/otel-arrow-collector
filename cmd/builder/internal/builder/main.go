@@ -36,6 +36,10 @@ func GenerateAndCompile(cfg Config) error {
 
 // Generate assembles a new distribution based on the given configuration
 func Generate(cfg Config) error {
+	if cfg.SkipGenerate {
+		cfg.Logger.Info("Skipping generating source codes.")
+		return nil
+	}
 	// create a warning message for non-aligned builder and collector base
 	if cfg.Distribution.OtelColVersion != defaultOtelColVersion {
 		cfg.Logger.Info("You're building a distribution with non-aligned version of the builder. Compilation may fail due to API changes. Please upgrade your builder or API", zap.String("builder-version", defaultOtelColVersion))
@@ -108,7 +112,7 @@ func GetModules(cfg Config) error {
 	}
 
 	// #nosec G204 -- cfg.Distribution.Go is trusted to be a safe path
-	cmd := exec.Command(cfg.Distribution.Go, "mod", "tidy", "-compat=1.19")
+	cmd := exec.Command(cfg.Distribution.Go, "mod", "tidy", "-compat=1.20")
 	cmd.Dir = cfg.Distribution.OutputPath
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to update go.mod: %w. Output:\n%s", err, out)

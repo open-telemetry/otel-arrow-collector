@@ -801,6 +801,64 @@ func TestHttpCorsWithSettings(t *testing.T) {
 	assert.Equal(t, "*", rec.Header().Get("Access-Control-Allow-Origin"))
 }
 
+func TestHttpServerHeaders(t *testing.T) {
+	tests := []struct {
+		name    string
+		headers map[string]configopaque.String
+	}{
+		{
+			name:    "noHeaders",
+			headers: nil,
+		},
+		{
+			name:    "emptyHeaders",
+			headers: map[string]configopaque.String{},
+		},
+		{
+			name: "withHeaders",
+			headers: map[string]configopaque.String{
+				"x-new-header-1": "value1",
+				"x-new-header-2": "value2",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hss := &HTTPServerSettings{
+				Endpoint:        "localhost:0",
+				ResponseHeaders: tt.headers,
+			}
+
+			ln, err := hss.ToListener()
+			require.NoError(t, err)
+
+			s, err := hss.ToServer(
+				componenttest.NewNopHost(),
+				componenttest.NewNopTelemetrySettings(),
+				http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusOK)
+				}))
+			require.NoError(t, err)
+
+			go func() {
+				_ = s.Serve(ln)
+			}()
+
+			// TODO: make starting server deterministic
+			// Wait for the servers to start
+			<-time.After(10 * time.Millisecond)
+
+			url := fmt.Sprintf("http://%s", ln.Addr().String())
+
+			// Verify allowed domain gets responses that allow CORS.
+			verifyHeadersResp(t, url, tt.headers)
+
+			require.NoError(t, s.Close())
+		})
+	}
+}
+
 func verifyCorsResp(t *testing.T, url string, origin string, maxAge int, extraHeader bool, wantStatus int, wantAllowed bool) {
 	req, err := http.NewRequest(http.MethodOptions, url, nil)
 	require.NoError(t, err, "Error creating trace OPTIONS request: %v", err)
@@ -839,6 +897,25 @@ func verifyCorsResp(t *testing.T, url string, origin string, maxAge int, extraHe
 	assert.Equal(t, wantMaxAge, resp.Header.Get("Access-Control-Max-Age"))
 }
 
+func verifyHeadersResp(t *testing.T, url string, expected map[string]configopaque.String) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	require.NoError(t, err, "Error creating request: %v", err)
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err, "Error sending request to http server: %v", err)
+
+	err = resp.Body.Close()
+	if err != nil {
+		t.Errorf("Error closing response body, %v", err)
+	}
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	for k, v := range expected {
+		assert.Equal(t, string(v), resp.Header.Get(k))
+	}
+}
+
 func ExampleHTTPServerSettings() {
 	settings := HTTPServerSettings{
 		Endpoint: "localhost:443",
@@ -860,7 +937,7 @@ func ExampleHTTPServerSettings() {
 	}
 }
 
-func TestHttpHeaders(t *testing.T) {
+func TestHttpClientHeaders(t *testing.T) {
 	tests := []struct {
 		name    string
 		headers map[string]configopaque.String
@@ -878,7 +955,7 @@ func TestHttpHeaders(t *testing.T) {
 				for k, v := range tt.headers {
 					assert.Equal(t, r.Header.Get(k), string(v))
 				}
-				w.WriteHeader(200)
+				w.WriteHeader(http.StatusOK)
 			}))
 			defer server.Close()
 			serverURL, _ := url.Parse(server.URL)
@@ -1037,6 +1114,66 @@ func TestFailedServerAuth(t *testing.T) {
 	// verify
 	assert.Equal(t, response.Result().StatusCode, http.StatusUnauthorized)
 	assert.Equal(t, response.Result().Status, fmt.Sprintf("%v %s", http.StatusUnauthorized, http.StatusText(http.StatusUnauthorized)))
+}
+
+func TestServerWithErrorHandler(t *testing.T) {
+	// prepare
+	hss := HTTPServerSettings{
+		Endpoint: "localhost:0",
+	}
+	eh := func(w http.ResponseWriter, r *http.Request, errorMsg string, statusCode int) {
+		assert.Equal(t, statusCode, http.StatusBadRequest)
+		// custom error handler changes returned status code
+		http.Error(w, "invalid request", http.StatusInternalServerError)
+
+	}
+
+	srv, err := hss.ToServer(
+		componenttest.NewNopHost(),
+		componenttest.NewNopTelemetrySettings(),
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}),
+		WithErrorHandler(eh),
+	)
+	require.NoError(t, err)
+	// test
+	response := &httptest.ResponseRecorder{}
+
+	req, err := http.NewRequest(http.MethodGet, srv.Addr, nil)
+	require.NoError(t, err, "Error creating request: %v", err)
+	req.Header.Set("Content-Encoding", "something-invalid")
+
+	srv.Handler.ServeHTTP(response, req)
+	// verify
+	assert.Equal(t, response.Result().StatusCode, http.StatusInternalServerError)
+}
+
+func TestServerWithDecoder(t *testing.T) {
+	// prepare
+	hss := HTTPServerSettings{
+		Endpoint: "localhost:0",
+	}
+	decoder := func(body io.ReadCloser) (io.ReadCloser, error) {
+		return body, nil
+	}
+
+	srv, err := hss.ToServer(
+		componenttest.NewNopHost(),
+		componenttest.NewNopTelemetrySettings(),
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}),
+		WithDecoder("something-else", decoder),
+	)
+	require.NoError(t, err)
+	// test
+	response := &httptest.ResponseRecorder{}
+
+	req, err := http.NewRequest(http.MethodGet, srv.Addr, nil)
+	require.NoError(t, err, "Error creating request: %v", err)
+	req.Header.Set("Content-Encoding", "something-else")
+
+	srv.Handler.ServeHTTP(response, req)
+	// verify
+	assert.Equal(t, response.Result().StatusCode, http.StatusOK)
+
 }
 
 type mockHost struct {
