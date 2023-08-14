@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	typeStr = "otlp"
+	typeStr = "otelarrow"
 
 	defaultGRPCEndpoint = "0.0.0.0:4317"
 	defaultHTTPEndpoint = "0.0.0.0:4318"

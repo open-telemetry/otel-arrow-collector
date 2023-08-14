@@ -11,9 +11,10 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 
-	arrowpb "github.com/f5/otel-arrow-adapter/api/experimental/arrow/v1"
-	arrowRecord "github.com/f5/otel-arrow-adapter/pkg/otel/arrow_record"
+	arrowpb "github.com/open-telemetry/otel-arrow/api/experimental/arrow/v1"
+	arrowRecord "github.com/open-telemetry/otel-arrow/pkg/otel/arrow_record"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"golang.org/x/net/http2/hpack"
@@ -31,6 +32,12 @@ import (
 
 // Stream is 1:1 with gRPC stream.
 type Stream struct {
+	// maxStreamLifetime is the max timeout before stream
+	// should be closed on the client side. This ensures a
+	// graceful shutdown before max_connection_age is reached
+	// on the server side.
+	maxStreamLifetime time.Duration
+
 	// producer is exclusive to the holder of the stream.
 	producer arrowRecord.ProducerAPI
 
@@ -149,8 +156,10 @@ func (s *Stream) run(bgctx context.Context, streamClient StreamClientFunc, grpcO
 	ww.Add(1)
 	go func() {
 		defer ww.Done()
-		defer cancel()
 		writeErr = s.write(ctx)
+		if writeErr != nil {
+			cancel()
+		}
 	}()
 
 	// the result from read() is processed after cancel and wait,
@@ -257,6 +266,8 @@ func (s *Stream) write(ctx context.Context) error {
 	var hdrsBuf bytes.Buffer
 	hdrsEnc := hpack.NewEncoder(&hdrsBuf)
 
+	timer := time.NewTimer(s.maxStreamLifetime)
+
 	for {
 		// Note: this can't block b/c stream has capacity &
 		// individual streams shut down synchronously.
@@ -265,8 +276,16 @@ func (s *Stream) write(ctx context.Context) error {
 		// this can block, and if the context is canceled we
 		// wait for the reader to find this stream.
 		var wri writeItem
+		var ok bool
 		select {
-		case wri = <-s.toWrite:
+		case <-timer.C:
+			s.prioritizer.removeReady(s)
+			return s.client.CloseSend()
+		case wri, ok = <-s.toWrite:
+			// channel is closed
+			if !ok {
+				return nil
+			}
 		case <-ctx.Done():
 			// Because we did not <-stream.toWrite, there
 			// is a potential sender race since the stream
@@ -325,8 +344,17 @@ func (s *Stream) read(_ context.Context) error {
 	// cancel a call to Recv() but the call to processBatchStatus
 	// is non-blocking.
 	for {
+		// Note: if the client has called CloseSend() and is waiting for a response from the server.
+		// And if the server fails for some reason, we will wait until some other condition, such as a context
+		// timeout.  TODO: possibly, improve to wait for no outstanding requests and then stop reading.
 		resp, err := s.client.Recv()
 		if err != nil {
+			// Once the send direction of stream is closed the server should return
+			// an error that mentions an EOF. The expected error code is codes.Unknown.
+			status, ok := status.FromError(err)
+			if ok && status.Message() == "EOF" && status.Code() == codes.Unknown {
+				return nil
+			}
 			// Note: do not wrap, contains a Status.
 			return err
 		}
@@ -334,6 +362,7 @@ func (s *Stream) read(_ context.Context) error {
 		if err = s.processBatchStatus(resp); err != nil {
 			return fmt.Errorf("process: %w", err)
 		}
+
 	}
 }
 
