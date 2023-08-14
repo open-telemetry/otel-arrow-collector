@@ -6,6 +6,7 @@ package confighttp // import "go.opentelemetry.io/collector/config/confighttp"
 import (
 	"crypto/tls"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"time"
@@ -219,6 +220,10 @@ type HTTPServerSettings struct {
 	// IncludeMetadata propagates the client metadata from the incoming requests to the downstream consumers
 	// Experimental: *NOTE* this option is subject to change or removal in the future.
 	IncludeMetadata bool `mapstructure:"include_metadata"`
+
+	// Additional headers attached to each HTTP response sent to the client.
+	// Header values are opaque since they may be sensitive.
+	ResponseHeaders map[string]configopaque.String `mapstructure:"response_headers"`
 }
 
 // ToListener creates a net.Listener.
@@ -243,7 +248,8 @@ func (hss *HTTPServerSettings) ToListener() (net.Listener, error) {
 // toServerOptions has options that change the behavior of the HTTP server
 // returned by HTTPServerSettings.ToServer().
 type toServerOptions struct {
-	errorHandler
+	errHandler func(w http.ResponseWriter, r *http.Request, errorMsg string, statusCode int)
+	decoders   map[string]func(body io.ReadCloser) (io.ReadCloser, error)
 }
 
 // ToServerOption is an option to change the behavior of the HTTP server
@@ -252,9 +258,20 @@ type ToServerOption func(opts *toServerOptions)
 
 // WithErrorHandler overrides the HTTP error handler that gets invoked
 // when there is a failure inside httpContentDecompressor.
-func WithErrorHandler(e errorHandler) ToServerOption {
+func WithErrorHandler(e func(w http.ResponseWriter, r *http.Request, errorMsg string, statusCode int)) ToServerOption {
 	return func(opts *toServerOptions) {
-		opts.errorHandler = e
+		opts.errHandler = e
+	}
+}
+
+// WithDecoder provides support for additional decoders to be configured
+// by the caller.
+func WithDecoder(key string, dec func(body io.ReadCloser) (io.ReadCloser, error)) ToServerOption {
+	return func(opts *toServerOptions) {
+		if opts.decoders == nil {
+			opts.decoders = map[string]func(body io.ReadCloser) (io.ReadCloser, error){}
+		}
+		opts.decoders[key] = dec
 	}
 }
 
@@ -267,10 +284,7 @@ func (hss *HTTPServerSettings) ToServer(host component.Host, settings component.
 		o(serverOpts)
 	}
 
-	handler = httpContentDecompressor(
-		handler,
-		withErrorHandlerForDecompressor(serverOpts.errorHandler),
-	)
+	handler = httpContentDecompressor(handler, serverOpts.errHandler, serverOpts.decoders)
 
 	if hss.MaxRequestBodySize > 0 {
 		handler = maxRequestBodySizeInterceptor(handler, hss.MaxRequestBodySize)
@@ -285,6 +299,7 @@ func (hss *HTTPServerSettings) ToServer(host component.Host, settings component.
 		handler = authInterceptor(handler, server)
 	}
 
+	// TODO: emit a warning when non-empty CorsHeaders and empty CorsOrigins.
 	if hss.CORS != nil && len(hss.CORS.AllowedOrigins) > 0 {
 		co := cors.Options{
 			AllowedOrigins:   hss.CORS.AllowedOrigins,
@@ -294,7 +309,10 @@ func (hss *HTTPServerSettings) ToServer(host component.Host, settings component.
 		}
 		handler = cors.New(co).Handler(handler)
 	}
-	// TODO: emit a warning when non-empty CorsHeaders and empty CorsOrigins.
+
+	if hss.ResponseHeaders != nil {
+		handler = responseHeadersHandler(handler, hss.ResponseHeaders)
+	}
 
 	// Enable OpenTelemetry observability plugin.
 	// TODO: Consider to use component ID string as prefix for all the operations.
@@ -318,6 +336,18 @@ func (hss *HTTPServerSettings) ToServer(host component.Host, settings component.
 	return &http.Server{
 		Handler: handler,
 	}, nil
+}
+
+func responseHeadersHandler(handler http.Handler, headers map[string]configopaque.String) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+
+		for k, v := range headers {
+			h.Set(k, string(v))
+		}
+
+		handler.ServeHTTP(w, r)
+	})
 }
 
 // CORSSettings configures a receiver for HTTP cross-origin resource sharing (CORS).
